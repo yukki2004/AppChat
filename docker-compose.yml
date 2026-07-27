@@ -1,0 +1,124 @@
+# Docker Compose — CHỈ hạ tầng (Postgres/MongoDB/Redis/RabbitMQ). Không chứa 8 service app —
+# service app kết nối vào hạ tầng này qua localhost (dev) hoặc network nội bộ (stg/prod),
+# Dockerfile/compose riêng cho service app sẽ thêm sau khi có business logic thật.
+#
+# Dùng kèm 1 trong 3 override tương ứng môi trường:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+#   docker compose -f docker-compose.yml -f docker-compose.stg.yml up -d
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: chatapp-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_SUPERUSER}
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD}
+      CORE_DB_NAME: ${CORE_DB_NAME}
+      CORE_DB_USER: ${CORE_DB_USER}
+      CORE_DB_PASSWORD: ${CORE_DB_PASSWORD}
+      NOTIFICATION_DB_NAME: ${NOTIFICATION_DB_NAME}
+      NOTIFICATION_DB_USER: ${NOTIFICATION_DB_USER}
+      NOTIFICATION_DB_PASSWORD: ${NOTIFICATION_DB_PASSWORD}
+      CALL_DB_NAME: ${CALL_DB_NAME}
+      CALL_DB_USER: ${CALL_DB_USER}
+      CALL_DB_PASSWORD: ${CALL_DB_PASSWORD}
+      SOCIAL_DB_NAME: ${SOCIAL_DB_NAME}
+      SOCIAL_DB_USER: ${SOCIAL_DB_USER}
+      SOCIAL_DB_PASSWORD: ${SOCIAL_DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_SUPERUSER}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - chatapp-infra
+
+  mongo:
+    image: mongo:7
+    container_name: chatapp-mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_SUPERUSER}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_SUPERUSER_PASSWORD}
+      MESSAGING_MONGO_DB_NAME: ${MESSAGING_MONGO_DB_NAME}
+      MESSAGING_MONGO_USER: ${MESSAGING_MONGO_USER}
+      MESSAGING_MONGO_PASSWORD: ${MESSAGING_MONGO_PASSWORD}
+      MEDIA_MONGO_DB_NAME: ${MEDIA_MONGO_DB_NAME}
+      MEDIA_MONGO_USER: ${MEDIA_MONGO_USER}
+      MEDIA_MONGO_PASSWORD: ${MEDIA_MONGO_PASSWORD}
+      SOCIAL_MONGO_DB_NAME: ${SOCIAL_MONGO_DB_NAME}
+      SOCIAL_MONGO_USER: ${SOCIAL_MONGO_USER}
+      SOCIAL_MONGO_PASSWORD: ${SOCIAL_MONGO_PASSWORD}
+    volumes:
+      - mongo_data:/data/db
+      - ./infra/mongo/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - chatapp-infra
+
+  redis:
+    image: redis:7-alpine
+    container_name: chatapp-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - chatapp-infra
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: chatapp-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - chatapp-infra
+
+  rabbitmq-setup:
+    image: rabbitmq:3-management
+    container_name: chatapp-rabbitmq-setup
+    restart: "no"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
+    entrypoint: ["/bin/bash", "/setup/declare-exchanges.sh"]
+    volumes:
+      - ./infra/rabbitmq/declare-exchanges.sh:/setup/declare-exchanges.sh:ro
+    networks:
+      - chatapp-infra
+
+volumes:
+  postgres_data:
+  mongo_data:
+  redis_data:
+  rabbitmq_data:
+
+networks:
+  chatapp-infra:
+    driver: bridge

@@ -1,0 +1,5 @@
+# Sinh code gRPC cho cả Go/Java/.NET từ 1 nguồn .proto duy nhất.
+# Chưa có plugin nào kích hoạt — sẽ bật đúng plugin cho từng service khi bắt đầu viết
+# .proto đầu tiên (VD identity/v1/identity.proto lúc code Core Service gRPC expose).
+version: v2
+plugins: []

@@ -1,0 +1,117 @@
+# CLAUDE.md — Core Service
+
+> Đọc `/CLAUDE.md` ở root trước. Service này GỘP 2 vai trò cũ: Identity Service + Group Service.
+> Đây là service NHIỀU service khác gRPC vào nhất — coi như "nguồn sự thật" về user và nhóm.
+
+## Vai trò
+
+Auth (đăng ký/đăng nhập/OAuth2/2FA), profile, friend, block, privacy — cộng với toàn bộ quản
+trị nhóm (tạo nhóm, phân quyền, invite/QR, duyệt thành viên, nickname, file/folder nhóm, sự
+kiện/lịch hẹn nhóm).
+
+## Tech stack
+
+Java 21 / Spring Boot 3. PostgreSQL. Redis cho session/OTP/rate-limit login.
+
+## Giao tiếp
+
+- **gRPC expose** (service khác gọi vào): `RefreshAccessToken`, `GetUserPublicInfo`,
+  `CheckFriendship`, `CheckBlock`, `GetPrivacySettings`, `GetGroupMembers`, `CheckGroupRole`,
+  `GetGroupInfo`. Không còn `VerifySession` — access token là JWT, API Gateway/WS Gateway tự
+  verify chữ ký tại chỗ bằng public key, không gọi gRPC mỗi request nữa (xem
+  `docs/.../05-cookie-auth-flow.md`). Core Service giữ private key RS256, KHÔNG service nào
+  khác được phát hành access token.
+- **RabbitMQ publish**: `user.exchange` — `user.registered`, `user.profile_updated`,
+  `user.blocked`, `friend.request_sent`, `friend.accepted`, `friend.removed`, `user.block_set`,
+  `user.block_removed` · `group.exchange` — `group.member_joined`, `group.member_removed`,
+  `group.role_changed`, `group.join_request`, `group.deleted`, `group.event_created`,
+  `group.event_reminder`.
+- **RabbitMQ consume**: `presence.offline` (cập nhật `last_seen_at`), `media.upload_completed`
+  / `media.quarantine` (dọn rác `group_files` khi file gốc bị xoá — xem mục Lưu ý bên dưới).
+
+## Chức năng chính
+
+Đăng ký/đăng nhập email+SĐT · OAuth2 (Google/Facebook/Apple) · 2FA (TOTP/SMS/Email) · quản lý
+thiết bị đăng nhập · đổi mật khẩu (revoke toàn bộ session) · privacy settings · kết bạn/chặn ·
+tạo nhóm, QR/invite link, duyệt thành viên, phân quyền OWNER/ADMIN/MEMBER · **nickname theo
+nhóm** · **file/folder chung của nhóm** (chỉ lưu tham chiếu `media_upload_id`, không lưu file
+thật) · **sự kiện/lịch hẹn nhóm + nhắc nhở** · **last_seen bền vững**.
+
+## Cấu trúc thư mục — package theo DOMAIN trước, layer sau (không package-by-type)
+
+Core Service gộp rất nhiều domain (auth, profile, friend, block, privacy, group...) nên package
+theo loại (`controller/` chứa hết mọi controller, `service/` chứa hết mọi service...) sẽ phồng to
+khó điều hướng. Thay vào đó mỗi domain tự đóng gói đủ Controller+Service+Repository+DTO của
+riêng nó — thêm domain mới = thêm 1 package mới, không đụng file domain khác. Bên TRONG mỗi domain
+vẫn giữ nguyên layer Controller → Service → Repository như bình thường.
+
+```
+com.chatapp.core/
+├── CoreServiceApplication.java
+├── user/                     # UserEntity/UserRepository dùng CHUNG bởi auth/profile/friend...
+├── auth/                     # register/login/logout/refresh, session (KHÔNG gộp OAuth/2FA vào)
+│   ├── AuthController.java
+│   ├── AuthService.java (interface) / impl/AuthServiceImpl.java
+│   ├── dto/request/, dto/response/
+│   ├── entity/UserSessionEntity.java
+│   └── repository/UserSessionRepository.java
+├── profile/, friend/, block/, privacy/    # thêm sau, cùng khuôn mẫu như auth/
+├── group/                    # domain nặng nhất — có thể lại chia sub-package member/, file/, event/
+├── security/                 # JwtKeyManager, JwtTokenProvider, JwksController — hạ tầng dùng CHUNG,
+│                              # không thuộc riêng domain nào
+├── grpc/                     # IdentityGrpcService, GroupGrpcService (expose sau)
+├── config/
+└── exception/                # GlobalExceptionHandler + custom exception
+```
+
+Quy tắc: domain nào cần `UserEntity` thì import từ `user/`, KHÔNG copy field hay tạo entity
+riêng. `security/` không phải 1 domain nghiệp vụ — nó là hạ tầng ký/verify JWT dùng chung cho
+mọi domain, nên tách riêng khỏi `auth/` (domain `auth/` gọi vào `security/`, không tự ký JWT).
+
+## Lưu ý khi code — 12 điểm dễ sai đã phát hiện lúc review spec
+
+1. **Revoke access token khi logout/đổi mật khẩu/admin block**: KHÔNG được coi "revoke
+   refresh_token trong DB" là xong việc — access token (JWT) đang lưu hành vẫn còn hiệu lực tới
+   khi hết hạn tự nhiên (15 phút) nếu không set thêm `cache:jwt_revoked_before:{user_id}` (logout
+   toàn bộ) hoặc `cache:jwt_blacklist:{jti}` (logout 1 thiết bị) trong Redis. Đây là bước BẮT
+   BUỘC đi kèm mọi thao tác revoke session, xem `docs/.../05-cookie-auth-flow.md` mục E.6.
+2. **Dọn rác `group_files`**: khi Media Service publish `media.upload_completed` bị xoá/quarantine
+   sau đó, PHẢI có consumer soft-delete dòng `group_files` tương ứng — nếu không, thư viện
+   nhóm sẽ hiện file chết trỏ tới upload không còn tồn tại.
+3. **Chống nhắc sự kiện trùng**: bảng `group_events` cần field `reminded_at` — scheduler/cron
+   quét event tới hạn PHẢI set `reminded_at = now()` ngay sau khi publish
+   `group.event_reminder`, để tránh worker chạy nhiều lần cùng publish trùng thông báo.
+4. **Cache invalidation khi update profile**: update `users.avatar_url`/`display_name` phải xoá
+   `cache:user:{id}` ngay lập tức (không đợi TTL 5 phút tự hết), rồi mới publish
+   `user.profile_updated` — nếu không, các service khác đọc cache cũ tới 5 phút.
+5. **Refresh token PHẢI hash trước khi lưu DB** — `user_sessions.token_hash` = SHA-256(giá trị
+   cookie), không bao giờ lưu giá trị gốc plaintext (khác với claim "session_id không mã hoá
+   thông tin gì" nói ở CLAUDE.md gốc — đó là nói payload không chứa claim, không phải nói được
+   phép lưu plaintext trong DB). Xem `docs/.../05-cookie-auth-flow.md`.
+6. **2FA bắt buộc qua `pre_auth_token`, không phát access/refresh token thật trước khi verify
+   xong mã 2FA** — xem `docs/.../05-cookie-auth-flow.md` mục E.9. Đây là lỗi dễ mắc nhất khi
+   implement 2FA: phát token thật ngay sau password đúng sẽ vô hiệu hoá toàn bộ mục đích 2FA.
+7. **Đổi email phải qua `pending_email`**, không ghi đè `users.email` ngay — chỉ cập nhật sau
+   khi OTP gửi tới email MỚI được xác minh đúng, tránh khoá tài khoản nếu gõ sai email mới.
+8. **OAuth account linking chỉ khi provider xác nhận email đã verified** — không tự động gộp
+   tài khoản theo email trùng nếu provider không xác nhận `email_verified=true` (chống
+   account-takeover). Xem ghi chú ở bảng `user_oauth_providers`.
+9. **Thêm thành viên vào nhóm PHẢI check `who_can_add_to_group`** của người được thêm (gRPC
+   `GetPrivacySettings`) trước khi insert `group_members` — nếu privacy là FRIENDS_ONLY (với
+   người lạ) hoặc NOBODY, không được add thẳng mà phải tạo dòng `group_invite_pending` chờ
+   người đó tự xác nhận. Bỏ qua bước check này là lỗ hổng spam-add-vào-nhóm phổ biến ở app chat.
+10. **`groups.only_admin_can_send`**: đây là field Core Service lưu, nhưng bên ENFORCE là
+    Messaging Service (gọi `CheckGroupRole` trước khi cho Member gửi tin) — Core chỉ cung cấp
+    dữ liệu qua `GetGroupInfo`, không tự chặn gửi tin (đó không phải việc của Core).
+11. **Report chỉ ở cấp user profile, không ôm luôn report tin nhắn/bài viết** — vi phạm
+    database-per-service nếu Messaging/Social gọi ngược vào bảng `reports` của Core cho report
+    nội dung cụ thể của họ. Report tin nhắn/bài viết PHẢI có bảng riêng ở đúng service đó.
+12. **Không bao giờ publish `user.reported` cho phía người bị report biết** — chỉ đẩy vào kênh
+    admin/nội bộ qua Notification Service, tránh lộ danh tính reporter gây trả thù.
+
+## Nguyên tắc hiển thị tên/avatar (áp dụng cho service khác đọc dữ liệu từ đây)
+
+Message/post/comment KHÔNG lưu snapshot tên/avatar người gửi — luôn hiển thị theo thông tin MỚI
+NHẤT từ Core Service. Ngoại lệ CÓ CHỦ ĐÍCH: `reply_snapshot` và `forwarded_from_sender` bên
+Messaging Service lưu snapshot tại thời điểm reply/forward để giữ ngữ cảnh lịch sử — không áp
+dụng nguyên tắc "luôn mới nhất" cho 2 field này.

@@ -1,0 +1,24 @@
+server:
+  port: 8092
+
+spring:
+  application:
+    name: social-service
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${SOCIAL_DB_NAME:social_db}
+    username: ${SOCIAL_DB_USER:social_user}
+    password: ${SOCIAL_DB_PASSWORD:}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
+  data:
+    mongodb:
+      uri: mongodb://${SOCIAL_MONGO_USER:social_user}:${SOCIAL_MONGO_PASSWORD:}@${MONGO_HOST:localhost}:${MONGO_PORT:27017}/${SOCIAL_MONGO_DB_NAME:social_db}?authSource=${SOCIAL_MONGO_DB_NAME:social_db}
+
+logging:
+  level:
+    root: INFO

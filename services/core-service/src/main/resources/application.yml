@@ -1,0 +1,31 @@
+server:
+  port: 8090
+
+spring:
+  application:
+    name: core-service
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${CORE_DB_NAME:core_db}
+    username: ${CORE_DB_USER:core_user}
+    password: ${CORE_DB_PASSWORD:}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
+
+app:
+  cookie-domain: ${COOKIE_DOMAIN:}
+
+jwt:
+  private-key-path: ${JWT_PRIVATE_KEY_PATH:./keys/private_key.pem}
+  public-key-path: ${JWT_PUBLIC_KEY_PATH:./keys/public_key.pem}
+  key-id: ${JWT_KEY_ID:core-dev-key-1}
+  access-token-ttl-seconds: 900
+  refresh-token-ttl-seconds: 2592000
+
+logging:
+  level:
+    root: INFO

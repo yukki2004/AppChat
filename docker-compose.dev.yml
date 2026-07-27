@@ -1,0 +1,19 @@
+# Override cho dev/local — mở port ra host để service app (chạy native, chưa Dockerize) và
+# công cụ GUI (DBeaver, MongoDB Compass, RabbitMQ management UI) kết nối trực tiếp qua localhost.
+services:
+  postgres:
+    ports:
+      - "${POSTGRES_PORT}:5432"
+
+  mongo:
+    ports:
+      - "${MONGO_PORT}:27017"
+
+  redis:
+    ports:
+      - "${REDIS_PORT}:6379"
+
+  rabbitmq:
+    ports:
+      - "${RABBITMQ_PORT}:5672"
+      - "${RABBITMQ_MANAGEMENT_PORT}:15672"

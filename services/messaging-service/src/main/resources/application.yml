@@ -1,0 +1,15 @@
+server:
+  port: 8091
+
+spring:
+  application:
+    name: messaging-service
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
+  data:
+    mongodb:
+      uri: mongodb://${MESSAGING_MONGO_USER:messaging_user}:${MESSAGING_MONGO_PASSWORD:}@${MONGO_HOST:localhost}:${MONGO_PORT:27017}/${MESSAGING_MONGO_DB_NAME:messaging_db}?authSource=${MESSAGING_MONGO_DB_NAME:messaging_db}
+
+logging:
+  level:
+    root: INFO

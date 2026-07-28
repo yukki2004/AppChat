@@ -285,6 +285,13 @@ verify, hoặc không trả field đó, KHÔNG được tự động link — ph
 | backup_codes_used | INT | NO | 0 | Số backup code đã dùng |
 | updated_at | TIMESTAMPTZ | NO | now() | UTC |
 
+> **Lazy-insert, không tạo sẵn dòng lúc register.** Đại đa số user không bao giờ bật 2FA, nên
+> KHÔNG insert dòng `two_factor_auth` mặc định cho mọi user lúc tạo tài khoản — chỉ
+> `INSERT ... ON CONFLICT (user_id) DO UPDATE` (upsert) khi user bấm bật/tắt/đổi method 2FA lần
+> đầu. Ở bước login, `SELECT ... WHERE user_id = ?` không trả dòng nào ⇒ coi như
+> `is_enabled = false`, bỏ qua bước 2FA, phát access_token/refresh_token thật luôn — KHÔNG được
+> coi "không có dòng" là lỗi hay tự động insert dòng mới ở luồng login.
+
 ### **ð user_privacy_settings  [PostgreSQL]**
 
 |  |  |  |  |  |

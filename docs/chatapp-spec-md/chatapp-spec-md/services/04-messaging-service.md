@@ -44,6 +44,7 @@
 | **27** | **Mark all read** | Update last_read_at trong conversation_members, reset unread_count. |
 | **28** | **Xoá toàn bộ lịch sử (chỉ mình)** | Soft delete tất cả messages phía người dùng đó trong conversation. |
 | **29** | **Sửa tin nhắn (edit)** | Chỉ sender, chỉ `message_type=MESSAGE_TEXT`, trong vòng 15 phút kể từ `sent_at`. Không sửa được nếu đã `deleted_for_all`/`deleted_for_sender`. Lưu bản cũ vào `edit_history` trước khi ghi đè `content`, set `edited_at=now()`. Publish `message.edited` → WS GW cập nhật bubble + hiện nhãn "đã chỉnh sửa". Nếu nội dung mới phát sinh @mention MỚI (chưa có ở bản cũ) → publish thêm `message.mention` riêng cho user mới được tag; KHÔNG publish lại cho user đã từng được mention ở bản cũ (tránh spam). |
+| **30** | **Gửi tin nhắn thoại (voice message)** | Client ghi âm → upload qua Media Service như file thường (mục 2), nhận `media_upload_id` + `cdn_url`. Tạo message với `message_type=MESSAGE_VOICE`, `media_mime_type` (audio/webm, audio/aac...), `media_duration_sec` bắt buộc, `waveform_data` (mảng amplitude do client tính sẵn, gửi kèm lúc tạo message) để vẽ sóng âm trên UI. Không lưu file audio trong DB — chỉ lưu `media_url` trỏ CDN, giống hệt ảnh/video (xem `skills/database-per-service.md` — chỉ Media Service được gọi R2 API trực tiếp). |
 
 ## **4.2 Naming Convention – Java (same as Identity)**
 
@@ -51,7 +52,7 @@ public class MessageDocument { }   // MongoDB document
 
 public class ConversationDocument { }
 
-public enum MessageType { MESSAGE_TEXT, MESSAGE_IMAGE, MESSAGE_VIDEO, MESSAGE_FILE, MESSAGE_GIF, MESSAGE_LINK, MESSAGE_STICKER, MESSAGE_STORY_REPLY, MESSAGE_CALL_LOG }
+public enum MessageType { MESSAGE_TEXT, MESSAGE_IMAGE, MESSAGE_VIDEO, MESSAGE_FILE, MESSAGE_GIF, MESSAGE_LINK, MESSAGE_STICKER, MESSAGE_STORY_REPLY, MESSAGE_CALL_LOG, MESSAGE_VOICE }
 
 public enum MessageStatus { SENT, DELIVERED, SEEN }
 
@@ -73,6 +74,7 @@ public enum PendingMessageStatus { WAITING, ACCEPTED, REJECTED, EXPIRED }
 | **MESSAGE_STICKER** | Sticker |
 | **MESSAGE_STORY_REPLY** | Reply vào story |
 | **MESSAGE_CALL_LOG** | Log cuộc gọi (missed/ended) |
+| **MESSAGE_VOICE** | Tin nhắn thoại (ghi âm gửi trực tiếp trong chat) |
 
 **Enum: MessageStatus**
 
@@ -103,6 +105,7 @@ public enum PendingMessageStatus { WAITING, ACCEPTED, REJECTED, EXPIRED }
 | media_duration_sec | Int | YES | NULL | Thời lượng video/audio |
 | media_width | Int | YES | NULL | Chiều rộng ảnh/video (px) |
 | media_height | Int | YES | NULL | Chiều cao ảnh/video (px) |
+| waveform_data | Array\<Int\> | YES | NULL | Mảng amplitude (0-100) client tính sẵn lúc ghi âm, chỉ dùng khi `message_type=MESSAGE_VOICE`, để vẽ sóng âm trên UI mà không cần decode lại file audio |
 | link_preview | Object | YES | NULL | { url, title, description, thumbnail_url, site_name } |
 | **sticker_id** | String | YES | NULL | ID sticker |
 | **reply_to_id** | ObjectId | YES | NULL | ID message được reply |

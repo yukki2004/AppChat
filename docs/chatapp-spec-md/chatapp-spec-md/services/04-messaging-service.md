@@ -130,9 +130,9 @@ public enum PendingMessageStatus { WAITING, ACCEPTED, REJECTED, EXPIRED }
 | :-: | :-: | :-: | :-: | :-: |
 | **Column** | **Type** | **Null** | **Default** | **Mô tả** |
 | **_id** | ObjectId | NO | auto | PK |
-| type | String | NO | – | DIRECT / GROUP |
-| participant_ids | Array<UUID> | NO | – | Members (DM: 2 người) |
-| **direct_pair_key** | String | YES | NULL | CHỈ set khi type=DIRECT: 2 user_id ghép lại theo thứ tự alphabet (VD `{uuid_nhỏ_hơn}_{uuid_lớn_hơn}`) — UNIQUE index (sparse, chỉ áp dụng field có giá trị) chống tạo trùng conversation DIRECT cho cùng 1 cặp, xem mục 4.11 |
+| type | String | NO | – | DIRECT / GROUP / SELF — xem mục 4.12 cho SELF |
+| participant_ids | Array<UUID> | NO | – | Members (DIRECT: 2 người, SELF: đúng 1 người — chính chủ) |
+| **direct_pair_key** | String | YES | NULL | Set khi type=DIRECT (2 user_id ghép theo thứ tự alphabet, VD `{uuid_nhỏ_hơn}_{uuid_lớn_hơn}`) HOẶC type=SELF (chính `user_id` đó, không ghép cặp) — UNIQUE index (sparse, chỉ áp dụng field có giá trị) chống tạo trùng conversation cho cùng 1 cặp/cùng 1 user, xem mục 4.11 |
 | is_pending_request | Boolean | NO | false | true = DM tạo do tin nhắn "người lạ" (pending), CHƯA hiện trong danh sách chat của receiver cho tới khi accept — xem mục 4.11 |
 | **last_message_id** | ObjectId | YES | NULL | Tin nhắn cuối |
 | last_message_preview | String | YES | NULL | Preview nội dung |
@@ -374,3 +374,72 @@ việc HIỂN THỊ:
   `is_pending_request=true` vĩnh viễn (không hiện lại trong danh sách chat của receiver trừ khi
   sender gửi tin pending mới lần nữa — tạo `pending_messages` record mới, dùng lại conversation
   cũ vì `direct_pair_key` đã tồn tại).
+
+## **4.12 Conversation type SELF — "Cloud của tôi" (lưu file cá nhân)**
+
+**Mục đích**: cho user 1 nơi lưu file riêng (ảnh, video, tài liệu) bằng cách nhắn tin nhắn với
+chính mình — không phải tính năng mới tách biệt, mà là 1 conversation với `participant_ids` chỉ
+có đúng 1 người (chính chủ), tái dùng 100% pipeline gửi tin nhắn/file đã có (F.6, F.7).
+
+|  |  |  |  |  |
+| :-: | :-: | :-: | :-: | :-: |
+| **#** | **Quy tắc** | **Chi tiết** |
+| **1** | **Tạo conversation SELF** | Lazy — tạo lần đầu user mở mục "Cloud của tôi", không tạo sẵn lúc đăng ký. `findOneAndUpdate` upsert theo `direct_pair_key = user_id` (dùng lại cơ chế chống trùng ở mục 4.11.c) để tránh race condition tạo 2 conversation SELF cùng lúc (VD: mở app trên 2 thiết bị cùng lúc lần đầu). |
+| **2** | **Bỏ qua CheckFriendship/CheckBlock** | Gửi message vào conversation SELF KHÔNG gọi gRPC `CheckFriendship`/`CheckBlock` (khác F.6 bước 4) — vì không có "người kia" để check quan hệ. |
+| **3** | **Không phát sinh push notification** | Notification Service consume `message.sent` như bình thường nhưng phải tự nhận diện `conversation.type=SELF` (denormalize kèm trong event payload) → luôn bỏ qua, không tạo push — vì `sender_id` và người nhận duy nhất là cùng 1 người, tự push cho chính mình vô nghĩa. |
+| **4** | **Đồng bộ đa thiết bị vẫn hoạt động bình thường** | `message.sent` vẫn publish/fan-out WS như F.6 bước 6-7 — đây chính là cơ chế khiến file vừa thêm ở điện thoại hiện ngay trên web, không cần thiết kế thêm gì riêng. |
+| **5** | **Không có trạng thái SEEN/DELIVERED có ý nghĩa** | `message_status` vẫn ghi nhận kỹ thuật nhưng UI không hiển thị tick xanh/xám cho conversation SELF (không có "người nhận" để phân biệt). |
+
+## **4.13 Thư mục & tổ chức file trong conversation (DIRECT / GROUP / SELF)**
+
+**Mục đích**: cho user tự tạo cây thư mục (lồng bao nhiêu cấp cũng được) để tổ chức lại file đã
+gửi trong 1 conversation — áp dụng đồng nhất cho cả 3 loại `DIRECT`/`GROUP`/`SELF` vì cả 3 đều là
+`conversations` (xem lịch sử đổi kiến trúc ở `03-core-service.md` mục 3.13).
+
+**Ràng buộc MVP giữ nguyên như thiết kế gốc**: file phải được gửi như message trong chat trước
+(F.6/F.7) — folder chỉ tổ chức lại file đã có, không upload thẳng vào folder.
+
+### Bảng: conversation_folders [MongoDB]
+
+|  |  |  |  |  |
+| :-: | :-: | :-: | :-: | :-: |
+| **Column** | **Type** | **Null** | **Default** | **Mô tả** |
+| **_id** | ObjectId | NO | auto | PK |
+| **conversation_id** | ObjectId | NO | – | Ref → conversations, dùng chung cho DIRECT/GROUP/SELF |
+| parent_folder_id | ObjectId | YES | NULL | Null = folder gốc |
+| **ancestor_ids** | Array<ObjectId> | NO | [] | Toàn bộ tổ tiên từ gốc tới cha trực tiếp — dùng `$in` query lấy nhanh mọi folder con cháu (xoá/move cả nhánh) mà không cần đệ quy nhiều lần (Mongo không có recursive CTE) |
+| name | String | NO | – | Tên do user đặt, giới hạn 255 ký tự/cấp, KHÔNG giới hạn số cấp lồng |
+| created_by | UUID | NO | – | Người tạo |
+| created_at | Date (UTC) | NO | now() | – |
+| updated_at | Date (UTC) | NO | now() | Đổi khi rename hoặc move sang cha khác |
+
+### Bảng: conversation_files [MongoDB] — chỉ lưu tham chiếu, không lưu file thật
+
+|  |  |  |  |  |
+| :-: | :-: | :-: | :-: | :-: |
+| **Column** | **Type** | **Null** | **Default** | **Mô tả** |
+| **_id** | ObjectId | NO | auto | PK |
+| **conversation_id** | ObjectId | NO | – | – |
+| folder_id | ObjectId | YES | NULL | Null = chưa phân loại (nằm ở gốc). KHÔNG bắt buộc folder đích phải là "lá" — 1 folder có thể vừa chứa file vừa chứa folder con cùng lúc |
+| **media_upload_id** | UUID | NO | – | Ref → media_uploads bên Media Service (không JOIN cross-DB, chỉ lưu ID, đúng nguyên tắc database-per-service) |
+| message_id | UUID | NO | – | Message gốc chứa file này (bắt buộc, vì MVP yêu cầu file phải "gửi" như message trước) |
+| added_by | UUID | NO | – | Người thêm vào folder (có thể khác người gửi gốc) |
+| added_at | Date (UTC) | NO | now() | – |
+
+**Quy tắc quyền hạn theo loại conversation:**
+- `type=GROUP`: tạo folder → gRPC `CheckGroupRole` sang Core, chỉ Admin/Owner. Thêm file vào folder có sẵn → mọi Member.
+- `type=DIRECT`: không có khái niệm role — cả 2 phía đều được tạo folder và thêm file ngang quyền nhau.
+- `type=SELF`: chỉ 1 người trong conversation, mặc định toàn quyền.
+
+**Thao tác move folder** (đổi `parent_folder_id` sang cha khác): validate cha mới không nằm
+trong chính `ancestor_ids` của folder đang move (chặn tạo vòng lặp cha-con), sau đó cascade update
+lại `ancestor_ids` cho toàn bộ folder con cháu (query theo `ancestor_ids` cũ chứa folder này).
+
+**Không được làm**: không bao giờ để tên folder do user đặt hay `folder_id` lọt vào R2 object key
+của file — R2 key sinh ra dựa trên `message_id`/`upload_id`, hoàn toàn bất biến và độc lập với
+việc user rename/move file giữa các folder logic (xem `skills/naming-conventions.md` mục 9).
+
+**Sự kiện mới** (routing key `chat.exchange`, theo đúng convention hiện có ở mục 4.5):
+`conversation.folder_created`, `conversation.folder_renamed`, `conversation.folder_deleted`,
+`conversation.file_added` → WS GW fan-out tới các thiết bị khác đang mở "thư viện file" của đúng
+conversation đó (kể cả conversation SELF, để đồng bộ đa thiết bị như mục 4.12 #4).

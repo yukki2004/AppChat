@@ -668,33 +668,21 @@ group-service/
 
 Bảng: group_member_nicknames [PostgreSQL]. Ràng buộc nghiệp vụ: Member chỉ sửa nickname của chính mình; Admin/Owner sửa được nickname của bất kỳ ai trong nhóm (dùng lại CheckGroupRole đã có ở gRPC Catalog).
 
-## **3.13 File / Folder chung của nhóm**
+## **3.13 File / Folder chung của nhóm — ĐÃ CHUYỂN sang Messaging Service**
 
-Bảng: group_file_folders [PostgreSQL]
-
-|  |  |  |  |  |
-| :-: | :-: | :-: | :-: | :-: |
-| **Column** | **Type** | **Null** | **Default** | **Mô tả** |
-| id | UUID | NO | gen_random_uuid() | PK |
-| group_id | UUID FK→groups | NO | – | Nhóm |
-| parent_folder_id | UUID FK→group_file_folders | YES | NULL | Null nếu là folder gốc |
-| name | VARCHAR(100) | NO | – | Tên folder |
-| created_by | UUID FK→users | NO | – | Người tạo |
-| created_at | TIMESTAMPTZ | NO | now() | UTC |
-
-Bảng: group_files [PostgreSQL] — chỉ lưu tham chiếu, không lưu file thật
-
-|  |  |  |  |  |
-| :-: | :-: | :-: | :-: | :-: |
-| **Column** | **Type** | **Null** | **Default** | **Mô tả** |
-| id | UUID | NO | gen_random_uuid() | PK |
-| group_id | UUID FK→groups | NO | – | – |
-| folder_id | UUID FK→group_file_folders | YES | NULL | Null = chưa phân loại |
-| media_upload_id | UUID | NO | – | Ref → media_uploads bên Media Service (không JOIN cross-DB, chỉ lưu ID) |
-| added_by | UUID FK→users | NO | – | Người thêm |
-| added_at | TIMESTAMPTZ | NO | now() | UTC |
-
-MVP: mọi file đều phải "gửi" như message trong chat trước, "thư viện nhóm" chỉ tổ chức lại file đã gửi theo folder — không upload thẳng vào folder ở giai đoạn này. Quyền: tạo folder → chỉ Admin/Owner; upload vào folder có sẵn → mọi Member.
+> **Đổi kiến trúc (review sau này)**: mục này ban đầu đặt `group_file_folders`/`group_files` tại
+> Core Service, FK thẳng vào bảng `groups` (PostgreSQL) của chính Core. Vấn đề: bảng `groups` chỉ
+> tồn tại cho chat NHÓM — chat 1-1 (DIRECT) và "cloud cá nhân" (SELF) không hề có row `groups`
+> tương ứng (2 loại này chỉ tồn tại trong `conversations` bên Messaging Service), nên không thể
+> mở rộng tính năng folder cho DIRECT/SELF nếu tiếp tục FK vào `groups` ở đây.
+>
+> Vì bản chất tính năng là **tổ chức file theo conversation** (khái niệm đã được Messaging Service
+> unify cho cả DIRECT/GROUP/SELF qua `conversations.type`), file/folder nên do Messaging Service sở
+> hữu, không phải Core. Đã chuyển toàn bộ sang `04-messaging-service.md` mục 4.13
+> (`conversation_folders`/`conversation_files`), áp dụng chung cho cả 3 loại conversation.
+> Core Service không còn giữ khái niệm file/folder nữa — quyền Admin/Owner tạo folder khi
+> `type=GROUP` vẫn do Core trả lời qua gRPC `CheckGroupRole` như cũ, chỉ có nơi LƯU folder là
+> chuyển đi.
 
 ## **3.14 Sự kiện / lịch hẹn nhóm**
 

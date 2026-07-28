@@ -97,3 +97,53 @@
 - RPC method: PascalCase, động từ đầu câu — `VerifySession`, `CheckFriendship`, `GetGroupMembers`.
 - Message request/response: tên method + `Request`/`Response` — `VerifySessionRequest`,
   `VerifySessionResponse`.
+
+## 9. Cloudflare R2 object key (thống nhất toàn hệ thống, chỉ Media Service ghi key này)
+
+> Áp dụng khi: Media Service sinh `r2_key` lúc khởi tạo upload session (mục 6.1 #1,
+> `06-media-service.md`). Đọc mục này TRƯỚC KHI đổi format `r2_key` — sai format ở đây rất khó
+> sửa về sau vì key được xem là bất biến sau khi tạo (xem quy tắc #3 bên dưới).
+
+**2 nhánh format, rẽ theo `context_type`:**
+
+- `context_type = message` (file gửi trong 1 conversation — DIRECT/GROUP/SELF đều tính, xem
+  `04-messaging-service.md` mục 4.12/4.13):
+
+  ```
+  message/{conversation_id}/{yyyy}/{mm}/{conversation_type}/{message_id}/{upload_id}/{variant}.{ext}
+  ```
+
+  VD: `message/conv_7a1.../2026/07/GROUP/msg_9f2.../upl_c81.../original.jpg`
+
+- `context_type ∈ {avatar, cover, post, story, sticker}` (không thuộc conversation nào):
+
+  ```
+  {context_type}/{yyyy}/{mm}/{context_id}/{upload_id}/{variant}.{ext}
+  ```
+
+  VD: `avatar/2026/07/user_5f0.../upl_1a2.../original.jpg`
+
+**Ý nghĩa từng token:**
+
+| Token | Lấy từ đâu | Quy tắc |
+|---|---|---|
+| `context_type` | Field `context_type` có sẵn trong `media_uploads` | Chữ thường, đúng 1 trong 6 giá trị: `message`, `avatar`, `cover`, `post`, `story`, `sticker` — không tự thêm giá trị khác |
+| `conversation_id` | `messages.conversation_id` | Chỉ có ở nhánh `message`. Cố định vĩnh viễn vì 1 message không bao giờ đổi conversation (forward tạo message MỚI ở conversation khác, không di chuyển message cũ — xem `forwarded_from_id` mục 4.4) nên đưa vào key không vi phạm tính bất biến |
+| `conversation_type` | `conversations.type` | `DIRECT` / `GROUP` / `SELF` — chèn giữa để nhận diện nhanh lúc debug/ops mà không cần query lại DB |
+| `yyyy`/`mm` | `created_at` | 4 số / 2 số đệm `0`, dùng làm prefix cho R2 lifecycle rule (retention/dọn rác) |
+| `context_id` | Field `context_id` có sẵn | message_id / user_id (avatar, cover) / post_id / story_id / sticker_pack_id |
+| `upload_id` | Field `upload_id` có sẵn | UUID v4 client-gen, đúng quy ước mục 2 |
+| `variant` | Không phải field DB, chỉ hậu tố lúc ghi key | Cố định 1 trong 3: `original` / `thumb` / `hls` |
+| `ext` | Map từ `mime_type` qua bảng whitelist cố định | KHÔNG lấy từ `original_file_name` do user đặt |
+
+**Quy tắc cứng:**
+
+1. Toàn bộ token chữ thường, phân cách bằng `/` — khác `.` của routing key (mục 1) và `:` của
+   cache key (mục 3), không lẫn lộn ký tự phân cách giữa 3 loại key này.
+2. Không bao giờ đưa `original_file_name`, tên folder, hay bất kỳ chuỗi do user tự gõ vào key —
+   chỉ ghép từ UUID/enum/số. Tránh path traversal và ký tự đặc biệt không hợp lệ với R2/S3 API.
+3. Key sinh ra đúng 1 lần lúc `status=PENDING` và **bất biến vĩnh viễn** sau đó. Mọi thao tác
+   sau này (rename/move folder logic ở `conversation_folders`, sửa message) chỉ sửa dữ liệu tham
+   chiếu trong DB, không bao giờ ghi lại hay đổi key này.
+4. Phân môi trường dev/stg/prod bằng **bucket riêng cho mỗi môi trường** (khớp
+   `.env.dev`/`.env.stg`/`.env.prod.example` hiện có), không nhét token môi trường vào key.

@@ -69,7 +69,7 @@
 | mime_type | String | NO | – | video/mp4, image/jpeg... |
 | original_file_name | String | NO | – | Tên file gốc |
 | file_size_bytes | Long | NO | – | Tổng kích thước |
-| r2_key | String | YES | NULL | Cloudflare R2 object key |
+| r2_key | String | YES | NULL | Cloudflare R2 object key — format bắt buộc theo `skills/naming-conventions.md` mục 9, bất biến sau khi tạo |
 | cdn_url | String | YES | NULL | Public CDN URL |
 | thumbnail_url | String | YES | NULL | Thumbnail CDN URL (video/image) |
 | duration_sec | Int | YES | NULL | Thời lượng video/audio |
@@ -81,7 +81,7 @@
 | chunks_uploaded | Int | NO | 0 | Số chunk đã nhận |
 | virus_scan_status | String | NO | PENDING | PENDING / CLEAN / INFECTED |
 | virus_scan_at | Date (UTC) | YES | NULL | Thời điểm scan |
-| context_type | String | YES | NULL | message / post / story / avatar / cover |
+| context_type | String | YES | NULL | message / post / story / avatar / cover / sticker — quyết định nhánh format `r2_key` (mục 9 naming-conventions.md); riêng `message` có thêm `conversation_id`/`conversation_type` trong key vì gắn với `conversations` (DIRECT/GROUP/SELF, xem `04-messaging-service.md` mục 4.12/4.13) |
 | **context_id** | String | YES | NULL | ID đối tượng liên quan |
 | is_deleted | Boolean | NO | false | Soft delete |
 | deleted_at | Date (UTC) | YES | NULL | UTC |

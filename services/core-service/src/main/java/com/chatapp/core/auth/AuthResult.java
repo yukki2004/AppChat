@@ -1,11 +1,11 @@
 package com.chatapp.core.auth;
 
-import com.chatapp.core.auth.dto.response.PublicUserDTO;
+import com.chatapp.core.auth.dto.response.UserResponse;
 
 /** Kết quả nội bộ của login/register — KHÔNG serialize thẳng ra JSON, Controller tự tách
- *  accessToken/refreshToken ra Set-Cookie, chỉ trả PublicUserDTO ở response body. */
+ *  accessToken/refreshToken ra Set-Cookie, chỉ trả UserResponse ở response body. */
 public record AuthResult(
-        PublicUserDTO user,
+        UserResponse user,
         String accessToken,
         String refreshToken,
         long accessTokenTtlSeconds,

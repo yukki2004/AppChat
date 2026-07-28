@@ -41,7 +41,9 @@
 | Entity (JPA) | PascalCase + suffix `Entity` | `UserEntity`, `FriendshipEntity` |
 | MongoDB Document | PascalCase + suffix `Document` | `MessageDocument`, `ConversationDocument` |
 | DTO request | PascalCase + suffix `Request` | `CreateUserRequest`, `SendMessageRequest` |
-| DTO response | `Public` + PascalCase + `DTO` | `PublicUserDTO`, `PublicMessageDTO` |
+| DTO response (REST thường) | PascalCase + suffix `Response` | `UserResponse`, `MessageResponse` |
+| DTO bắn ra WebSocket | PascalCase + suffix `Public` | `UserPublic`, `MessagePublic` |
+| DTO dùng để cache (Redis) | PascalCase + suffix `Cache` | `UserCache`, `SessionCache` |
 | Service class | PascalCase + suffix `Service` | `AuthService`, `MessageService` |
 | Repository | PascalCase + suffix `Repository` | `UserRepository`, `MessageRepository` |
 | Controller | PascalCase + suffix `Controller` | `AuthController`, `MessageController` |
@@ -57,7 +59,9 @@
 |---|---|---|
 | Entity (EF Core) | PascalCase + suffix `Entity` | `NotificationEntity` |
 | DTO request | PascalCase + suffix `Request` | `RegisterDeviceTokenRequest` |
-| DTO response | `Public` + PascalCase + `DTO` | `PublicNotificationDTO` |
+| DTO response (REST thường) | PascalCase + suffix `Response` | `NotificationResponse` |
+| DTO bắn ra WebSocket | PascalCase + suffix `Public` | `NotificationPublic` |
+| DTO dùng để cache (Redis) | PascalCase + suffix `Cache` | `DeviceTokenCache` |
 | Service class | PascalCase + suffix `Service` | `NotificationService` |
 | Interface | `I` + PascalCase | `IPushProvider` |
 | Controller | PascalCase + suffix `Controller` | `CallController` |
@@ -79,7 +83,9 @@
 | Variable | camelCase | `sessionID`, `userID`, `connID` |
 | Package | lowercase, 1 từ | `package middleware`, `package handler` |
 | File | snake_case.go | `presence_service.go`, `cookie_auth.go` |
-| DTO struct | PascalCase + `DTO` | `type PublicPresenceDTO struct {}` |
+| DTO response (REST thường) | PascalCase + suffix `Response` | `type PresenceResponse struct {}` |
+| DTO bắn ra WebSocket | PascalCase + suffix `Public` | `type PresencePublic struct {}` |
+| DTO dùng để cache (Redis) | PascalCase + suffix `Cache` | `type PresenceCache struct {}` |
 
 ## 7. Database — table/collection/field
 

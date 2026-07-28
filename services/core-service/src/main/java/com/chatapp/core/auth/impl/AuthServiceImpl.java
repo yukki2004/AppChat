@@ -15,7 +15,7 @@ import com.chatapp.core.auth.AuthResult;
 import com.chatapp.core.auth.AuthService;
 import com.chatapp.core.auth.dto.request.LoginRequest;
 import com.chatapp.core.auth.dto.request.RegisterRequest;
-import com.chatapp.core.auth.dto.response.PublicUserDTO;
+import com.chatapp.core.auth.dto.response.UserResponse;
 import com.chatapp.core.auth.entity.UserSessionEntity;
 import com.chatapp.core.auth.repository.UserSessionRepository;
 import com.chatapp.core.exception.DuplicateUserException;
@@ -39,7 +39,7 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     @Transactional
-    public PublicUserDTO register(RegisterRequest request) {
+    public UserResponse register(RegisterRequest request) {
         if (userRepository.existsByUsername(request.getUsername())) {
             throw new DuplicateUserException("Username đã tồn tại");
         }
@@ -51,7 +51,7 @@ public class AuthServiceImpl implements AuthService {
         UserEntity user = new UserEntity(request.getUsername(), request.getEmail(), passwordHash, request.getDisplayName());
         UserEntity saved = userRepository.save(user);
 
-        return PublicUserDTO.from(saved);
+        return UserResponse.from(saved);
     }
 
     @Override
@@ -80,7 +80,7 @@ public class AuthServiceImpl implements AuthService {
         String accessToken = jwtTokenProvider.generateAccessToken(user.getId());
 
         return new AuthResult(
-                PublicUserDTO.from(user),
+                UserResponse.from(user),
                 accessToken,
                 rawRefreshToken,
                 jwtTokenProvider.getAccessTokenTtlSeconds(),

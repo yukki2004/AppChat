@@ -11,7 +11,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.chatapp.core.auth.dto.request.LoginRequest;
 import com.chatapp.core.auth.dto.request.RegisterRequest;
-import com.chatapp.core.auth.dto.response.PublicUserDTO;
+import com.chatapp.core.auth.dto.response.UserResponse;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -33,12 +33,12 @@ public class AuthController {
     private String cookieDomain;
 
     @PostMapping("/auth/register")
-    public ResponseEntity<PublicUserDTO> register(@Valid @RequestBody RegisterRequest request) {
+    public ResponseEntity<UserResponse> register(@Valid @RequestBody RegisterRequest request) {
         return ResponseEntity.ok(authService.register(request));
     }
 
     @PostMapping("/auth/login")
-    public ResponseEntity<PublicUserDTO> login(@Valid @RequestBody LoginRequest request,
+    public ResponseEntity<UserResponse> login(@Valid @RequestBody LoginRequest request,
                                                 @RequestHeader(value = "User-Agent", required = false) String userAgent,
                                                 HttpServletRequest httpRequest) {
         AuthResult result = authService.login(request, httpRequest.getRemoteAddr(), userAgent);

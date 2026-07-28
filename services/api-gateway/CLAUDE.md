@@ -21,6 +21,10 @@ và rate-limit counter.
 - **gRPC gọi ra**: `core-service.RefreshAccessToken(refresh_token)` — chỉ gọi khi route
   `/auth/refresh`, không phải mọi request.
 - **Forward HTTP** tới service đích sau khi verify xong, kèm header `X-User-Id`.
+- **Client IP tin cậy**: đọc `X-Forwarded-For`/`CF-Connecting-IP` rồi ghi đè thành `X-Client-IP`
+  khi forward xuống downstream — luôn strip giá trị client tự gửi lên trước, không bao giờ
+  forward thẳng. Đây là nguồn IP duy nhất Core Service dùng để ghi `user_sessions.ip_address` và
+  resolve geo-location (xem `docs/.../05-cookie-auth-flow.md` E.10).
 - Không publish/consume RabbitMQ trực tiếp.
 
 ## Chức năng chính

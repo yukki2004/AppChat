@@ -196,4 +196,52 @@ POST /auth/login/2fa  { pre_auth_token, code }
 - Endpoint `/auth/login/2fa` không đọc `X-User-Id` hay bất kỳ cookie auth nào — toàn bộ danh
   tính lấy từ `pre_auth_token`, vì tại thời điểm này user CHƯA được coi là đã đăng nhập.
 
+## **E.10 Thu thập IP / thiết bị / địa điểm lúc login — ghi vào `user_sessions`**
+
+Áp dụng cho mọi request tạo session (`/auth/login`, `/auth/login/2fa`, `/auth/oauth/callback`,
+`/auth/refresh`) — Core Service phải điền đủ `ip_address`, `device_id`, `device_name`,
+`platform`, `user_agent`, `login_country`, `login_city` của `user_sessions` (mục 3.2,
+`03-core-service.md`) ngay lúc insert, không để trống rồi cập nhật sau.
+
+**IP — chốt 1 lần duy nhất ở API Gateway, không tự đọc lại ở service khác:**
+- API Gateway đọc IP thật của client từ `X-Forwarded-For` (hoặc `CF-Connecting-IP` nếu có
+  Cloudflare phía trước) ngay tại tầng biên, rồi **ghi đè** thành header `X-Client-IP` khi
+  forward xuống downstream.
+- Downstream (Core Service) chỉ đọc `X-Client-IP` do Gateway set, **không bao giờ tin** giá trị
+  `X-Client-IP`/`X-Forwarded-For` nếu client tự gửi lên thẳng — Gateway phải strip/ghi đè header
+  này trước khi forward, tránh giả mạo IP để né rate-limit theo IP hoặc giả vờ login từ địa điểm
+  khác.
+- Core Service tuyệt đối không dùng địa chỉ IP của kết nối TCP tới nó (đó là IP của Gateway, sai).
+
+**Địa điểm (`login_country`, `login_city`) — tự host, không gọi API bên thứ 3:**
+- Core Service tự host **MaxMind GeoLite2-City** (`.mmdb`), lookup offline trong process bằng
+  `com.maxmind.geoip2:geoip2` — không gọi ipapi.co/ip-api.com hay dịch vụ ngoài nào (tốn latency
+  mỗi login, tốn phí khi scale, và gửi IP người dùng ra bên thứ 3 không cần thiết).
+- File `.mmdb` cập nhật định kỳ (cron tải lại từ MaxMind mỗi tháng, cần free license key) —
+  không bao giờ cache vĩnh viễn 1 bản build một lần rồi quên update.
+- Độ chính xác chỉ ở mức thành phố/quốc gia — đây là giới hạn thật của GeoIP, không cố suy ra
+  địa chỉ cụ thể hơn.
+
+**Thiết bị (`device_id`, `device_name`, `platform`) — nguồn khác nhau theo platform, KHÔNG có
+cách server tự lấy chung cho cả web và mobile:**
+- **Web**: browser không bao giờ cho lấy tên máy thật (chặn vì privacy/fingerprinting).
+  `device_name` chỉ nên fallback = chuỗi parse từ header `User-Agent` (VD "Chrome on Windows"),
+  parse bằng `nl.basjes.parse.useragent:yauaa` — không tự viết regex parse UA tay. `device_id`
+  cho web là 1 UUID random client tự sinh, lưu `localStorage`, gửi kèm mỗi lần login để nhận
+  diện lại đúng trình duyệt đó ở lần sau.
+- **Mobile (iOS/Android)**: `device_name`/`device_id`/`platform` do **client app tự đọc bằng SDK
+  hệ điều hành** (`UIDevice.current.name`, `Build.MODEL`) rồi gửi thẳng trong body request login
+  — Core Service chỉ lưu lại, không tự suy ra được giá trị này từ header HTTP.
+
+**Cảnh báo đăng nhập từ thiết bị/địa điểm mới:**
+- Sau khi insert `user_sessions` thành công, Core Service so `device_id` với các session còn
+  `is_active=true` gần nhất của user — nếu `device_id` chưa từng thấy (hoặc `login_country`
+  khác hẳn lần gần nhất và khoảng cách thời gian giữa 2 lần login là bất hợp lý về mặt di
+  chuyển) → publish `user.new_device_login` (`user.exchange`) kèm `device_name`, `login_city`,
+  `login_country`, thời điểm login.
+- Notification Service consume event này → gửi email/push cảnh báo bảo mật "Đăng nhập mới từ
+  {device_name}, {login_city}" — KHÔNG chặn login (không phải cơ chế duyệt trước), chỉ thông
+  báo sau khi đã tạo session, để user tự bấm "không phải tôi" → trigger `/auth/logout-all` nếu
+  cần.
+
 *─── Hết tài liệu ───*

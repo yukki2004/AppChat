@@ -18,6 +18,7 @@
 | **2** | **Cookie Authentication** | Đọc HttpOnly cookie access_token (JWT) → verify chữ ký RS256 tại chỗ + check `exp` + Redis check revoke (`cache:jwt_revoked_before`, `cache:jwt_blacklist`) → lấy user_id từ claim `sub`. Reject 401 (TOKEN_EXPIRED / TOKEN_REVOKED) nếu invalid. |
 | **3** | **Rate Limiting** | Token bucket per IP và per user_id. Lưu counter Redis với TTL. Trả 429 khi vượt ngưỡng. |
 | **4** | **Request ID Injection** | Gán X-Request-ID (UUID v4) vào mọi request để trace end-to-end qua các service. |
+| **4b** | **Client IP Injection** | Đọc IP thật từ `X-Forwarded-For`/`CF-Connecting-IP`, ghi đè thành header `X-Client-IP` khi forward downstream — luôn strip giá trị `X-Client-IP`/`X-Forwarded-For` do client tự gửi lên trước khi xử lý, chống giả mạo IP. Downstream (Core Service) chỉ tin `X-Client-IP` do Gateway set. Xem `system/05-cookie-auth-flow.md` E.10. |
 | **5** | **CORS** | Cấu hình whitelist origin, method, header. Preflight OPTIONS response. |
 | **6** | **SSL Termination** | Terminate TLS tại gateway. Downstream dùng HTTP nội bộ. |
 | **7** | **Request Logging** | Log mọi request: method, path, status, latency, user_id, request_id vào structured log (JSON). |

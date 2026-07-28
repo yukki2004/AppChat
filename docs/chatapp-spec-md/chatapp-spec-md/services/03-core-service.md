@@ -247,8 +247,10 @@ verify, hoặc không trả field đó, KHÔNG được tự động link — ph
 | **device_id** | VARCHAR(100) | YES | NULL | Device fingerprint |
 | device_name | VARCHAR(150) | YES | NULL | Tên thiết bị (iPhone 15, Chrome/Mac) |
 | platform | VARCHAR(20) | YES | NULL | ios / android / web |
-| ip_address | INET | YES | NULL | IP đăng nhập |
+| ip_address | INET | YES | NULL | IP đăng nhập — lấy từ header `X-Client-IP` do API Gateway set, xem `05-cookie-auth-flow.md` E.10 |
 | user_agent | TEXT | YES | NULL | Browser / app user agent |
+| login_country | VARCHAR(2) | YES | NULL | ISO country code, resolve từ `ip_address` bằng MaxMind GeoLite2 lúc login — xem E.10 |
+| login_city | VARCHAR(100) | YES | NULL | Resolve cùng lúc với `login_country`, chỉ chính xác tới mức thành phố |
 | is_active | BOOLEAN | NO | true | Session còn hiệu lực |
 | expires_at | TIMESTAMPTZ | NO | – | UTC – hết hạn (now + 30d) |
 | last_active_at | TIMESTAMPTZ | NO | now() | UTC – hoạt động cuối |

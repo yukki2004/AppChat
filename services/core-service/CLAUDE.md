@@ -22,8 +22,8 @@ Java 21 / Spring Boot 3. PostgreSQL. Redis cho session/OTP/rate-limit login.
   `docs/.../05-cookie-auth-flow.md`). Core Service giữ private key RS256, KHÔNG service nào
   khác được phát hành access token.
 - **RabbitMQ publish**: `user.exchange` — `user.registered`, `user.profile_updated`,
-  `user.blocked`, `friend.request_sent`, `friend.accepted`, `friend.removed`, `user.block_set`,
-  `user.block_removed` · `group.exchange` — `group.member_joined`, `group.member_removed`,
+  `user.blocked`, `user.new_device_login`, `friend.request_sent`, `friend.accepted`,
+  `friend.removed`, `user.block_set`, `user.block_removed` · `group.exchange` — `group.member_joined`, `group.member_removed`,
   `group.role_changed`, `group.join_request`, `group.deleted`, `group.event_created`,
   `group.event_reminder`.
 - **RabbitMQ consume**: `presence.offline` (cập nhật `last_seen_at`), `media.upload_completed`
@@ -108,6 +108,12 @@ mọi domain, nên tách riêng khỏi `auth/` (domain `auth/` gọi vào `secur
     nội dung cụ thể của họ. Report tin nhắn/bài viết PHẢI có bảng riêng ở đúng service đó.
 12. **Không bao giờ publish `user.reported` cho phía người bị report biết** — chỉ đẩy vào kênh
     admin/nội bộ qua Notification Service, tránh lộ danh tính reporter gây trả thù.
+13. **IP/thiết bị/địa điểm lúc login**: `ip_address` PHẢI đọc từ header `X-Client-IP` do API
+    Gateway set (không tự đọc IP kết nối TCP tới Core Service — đó là IP của Gateway, sai).
+    `login_country`/`login_city` resolve bằng MaxMind GeoLite2 tự host, không gọi API bên thứ 3.
+    `device_id`/`device_name` mobile do client SDK gửi lên, web thì fallback parse `User-Agent`
+    — không có cách server tự lấy "tên máy" thật cho web. Chi tiết đầy đủ + luồng cảnh báo
+    "đăng nhập thiết bị mới": `docs/.../05-cookie-auth-flow.md` mục E.10.
 
 ## Nguyên tắc hiển thị tên/avatar (áp dụng cho service khác đọc dữ liệu từ đây)
 

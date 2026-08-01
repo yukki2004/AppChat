@@ -8,7 +8,7 @@ Story, post, react, comment, feed, tag — phần "mạng xã hội" tách biệ
 
 ## Tech stack
 
-Java 21 / Spring Boot 3. PostgreSQL (post, comment, reaction) + MongoDB (story view, feed
+Java 25 / Spring Boot 4. PostgreSQL (post, comment, reaction) + MongoDB (story view, feed
 cache).
 
 ## Giao tiếp

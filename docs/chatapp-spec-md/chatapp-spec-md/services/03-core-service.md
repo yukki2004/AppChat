@@ -4,7 +4,7 @@
 
 |  |  |
 | :-: | :-: |
-| **Ngôn ngữ** | Java 21 / Spring Boot 3 |
+| **Ngôn ngữ** | Java 25 / Spring Boot 4 |
 | **Database** | PostgreSQL |
 | **Cache** | Redis (session, OTP, rate limit login) |
 | **Auth** | HttpOnly Secure SameSite=Strict Cookie. access_token = JWT RS256 (TTL 15p, verify tại chỗ ở Gateway). refresh_token = UUID v4 ngẫu nhiên, lưu Redis+DB TTL rolling 30 ngày. Chi tiết: `system/05-cookie-auth-flow.md`. |
@@ -478,7 +478,7 @@ identity-service/
 
 |  |  |
 | :-: | :-: |
-| **Ngôn ngữ** | Java 21 / Spring Boot 3 |
+| **Ngôn ngữ** | Java 25 / Spring Boot 4 |
 | **Database** | PostgreSQL |
 | **Cache** | Redis (cache:group:*, cache:group:members:*) |
 | **gRPC exposed** | GetGroupMembers, CheckGroupRole, GetGroupInfo |

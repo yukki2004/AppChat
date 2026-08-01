@@ -2,7 +2,7 @@
 
 |  |  |
 | :-: | :-: |
-| **Ngôn ngữ** | Java 21 / Spring Boot 3 |
+| **Ngôn ngữ** | Java 25 / Spring Boot 4 |
 | **Database** | MongoDB (messages, conversations) + PostgreSQL (conversation metadata, pins) |
 | **Cache** | Redis (conversation list, pin cache, seen status buffer) |
 | **Outbox** | outbox_events collection trong MongoDB |

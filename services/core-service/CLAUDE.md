@@ -11,7 +11,7 @@ kiện/lịch hẹn nhóm).
 
 ## Tech stack
 
-Java 21 / Spring Boot 3. PostgreSQL. Redis cho session/OTP/rate-limit login.
+Java 25 / Spring Boot 4. PostgreSQL. Redis cho session/OTP/rate-limit login.
 
 ## Giao tiếp
 

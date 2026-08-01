@@ -10,7 +10,7 @@ reply, poll/vote, tin nhắn tạm thời.
 
 ## Tech stack
 
-Java 21 / Spring Boot 3. MongoDB (`messages`, `conversations`) + PostgreSQL cho phần liên quan
+Java 25 / Spring Boot 4. MongoDB (`messages`, `conversations`) + PostgreSQL cho phần liên quan
 tới metadata do Group cũ quản lý trước đây (nay đã gộp vào Core, Messaging chỉ gRPC sang lấy).
 
 ## Giao tiếp

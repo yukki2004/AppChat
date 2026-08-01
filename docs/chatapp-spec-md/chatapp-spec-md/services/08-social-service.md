@@ -2,7 +2,7 @@
 
 |  |  |
 | :-: | :-: |
-| **Ngôn ngữ** | Java 21 / Spring Boot 3 |
+| **Ngôn ngữ** | Java 25 / Spring Boot 4 |
 | **Database** | PostgreSQL (posts, reactions, comments) + MongoDB (story views, feed cache) |
 | **Cache** | Redis (story list, post feed, reaction count) |
 

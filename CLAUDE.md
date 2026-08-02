@@ -74,6 +74,10 @@ chatapp-backend/
 
 ## Quy tắc làm việc cho AI coding agent
 
+- Trước khi bắt tay code 1 chức năng, lướt qua tiêu đề + dòng "Áp dụng khi" ở đầu mỗi file
+  `skills/*.md` để xác định file nào liên quan — CHỈ đọc toàn bộ nội dung file nào thực sự áp
+  dụng, không đọc hết toàn bộ nội dung mọi skill "cho chắc". Tốn token đọc thừa những skill
+  không liên quan tới việc đang làm là lãng phí không cần thiết.
 - Trước khi sửa code 1 service, đọc `services/<tên-service>/CLAUDE.md` trước.
 - Trước khi đặt tên DTO/event/bảng/routing key mới, đọc `skills/naming-conventions.md` — không
   tự bịa convention mới dù có vẻ hợp lý.
@@ -86,3 +90,10 @@ chatapp-backend/
 - Nếu spec (`docs/ChatApp_Architecture_Spec.docx`) và code hiện tại mâu thuẫn nhau, hỏi lại
   người dùng thay vì tự quyết theo 1 trong 2 nguồn.
 - Không tự thêm service thứ 9 hoặc gộp/tách service đã chốt mà không hỏi trước.
+- **Sửa nghiệp vụ/schema/luồng nào thì phải sửa đúng doc + skill liên quan trong CÙNG lượt
+  thay đổi, không để lệch giữa code và doc.** Đổi tên bảng, thêm/bớt field, đổi enum, đổi luồng
+  business (VD: đổi thiết kế 2FA từ single-method sang multi-method) đều phải cập nhật ngay
+  file `docs/chatapp-spec-md/.../services/<service>.md` hoặc `system/*.md` tương ứng, và
+  `skills/*.md` nếu convention bị ảnh hưởng (VD: đổi cấu trúc cache key). Không để việc này
+  "làm sau" hay "dồn lại 1 lượt" — doc lệch code dù chỉ 1 commit cũng đủ khiến agent sau đọc sai
+  và code theo thiết kế đã lỗi thời.

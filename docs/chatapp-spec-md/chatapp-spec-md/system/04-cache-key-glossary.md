@@ -4,7 +4,9 @@
 | :-: | :-: | :-: | :-: |
 | **Key Pattern** | **Type** | **TTL** | **Nội dung** |
 | cache:refresh_token:{refresh_token} | String JSON | 30 ngày (rolling) | { user_id, device_id... } — index Redis của `user_sessions`, dùng khi `RefreshAccessToken`. Key dùng giá trị gốc (Redis không phải nơi bị đọc trộm hàng loạt như DB backup), nhưng DB (`user_sessions.token_hash`) vẫn chỉ lưu SHA-256 |
-| cache:pre_auth:{pre_auth_token} | String JSON | 5 phút | { user_id } — trạng thái trung gian đã verify password, CHƯA verify 2FA. Xem `system/05-cookie-auth-flow.md` E.9 |
+| cache:pre_auth:{pre_auth_token} | String JSON | 5 phút | { user_id } lúc mới tạo (sau bước 1, chưa chọn method) → { user_id, method } sau khi gọi `/auth/login/2fa/challenge` (bước 2, đổi được nhiều lần, không đổi `pre_auth_token`). Xem `system/05-cookie-auth-flow.md` E.9 |
+| cache:pending_totp_secret:{user_id} | String (Base32) | 10 phút | Secret TOTP tạm giữa `/2fa/totp/setup` và `/2fa/totp/confirm` — CHƯA ghi `two_factor_methods` cho tới khi confirm đúng mã |
+| cache:otp_lockout:{purpose}:{target} | String "1" | app.otp.lockout-seconds (mặc định 1800s) | Set khi 1 mã OTP sai đủ `max_attempts` — chặn cả sinh mã mới lẫn verify cho tới khi hết TTL, xem `03-core-service.md` mục otp_codes |
 | cache:jwt_blacklist:{jti} | String "1" | = thời gian còn lại tới `exp` của token đó | Access token bị revoke khi logout 1 thiết bị |
 | cache:jwt_revoked_before:{user_id} | String (timestamp) | 900s (= TTL access token) | Mốc revoke toàn cục khi logout tất cả thiết bị / đổi mật khẩu / admin block — JWT có `iat` <= mốc này bị từ chối |
 | cache:user:{user_id} | String JSON | 5 phút | PublicUserDTO |

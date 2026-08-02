@@ -43,7 +43,7 @@
 | **25** | **Gỡ chặn** | Delete user_blocks. Publish event user.unblocked. |
 | **26** | **Danh sách bạn thân (Close Friends)** | Quản lý close_friends list – dùng cho story visibility. |
 | **27** | **Xem profile người khác** | Trả thông tin theo privacy_settings. Blocked → 404. |
-| **28** | **Backup codes 2FA** | Generate 8 backup codes, lưu hash. Dùng thay TOTP khi mất thiết bị. |
+| **28** | **Backup codes 2FA** | Generate 8 backup codes, lưu hash, trả về lúc bật method 2FA đầu tiên. Regenerate được (re-auth password). Dùng thay TOTP/SMS/EMAIL khi mất quyền truy cập method chính. |
 | **29** | **Audit Log truy cập** | Ghi mọi login, logout, đổi password vào login_audit_logs. |
 | **30** | **Report người dùng** | Tạo `reports` (reported_type=USER), rate-limit số report gửi/ngày để chống lạm dụng, publish `user.reported` CHỈ cho kênh admin (không báo cho người bị report — tránh trả thù). Xem mục 3.16. |
 
@@ -120,9 +120,10 @@ public UUID userId;             // camelCase public field
 | :-: | :-: |
 | **Giá trị** | **Ý nghĩa** |
 | **REGISTER** | Xác minh đăng ký |
-| **LOGIN_2FA** | Xác thực 2 bước khi đăng nhập |
+| **LOGIN_2FA** | Xác thực 2 bước khi đăng nhập (method SMS/EMAIL) |
 | **RESET_PASSWORD** | Đặt lại mật khẩu |
 | **CHANGE_EMAIL** | Đổi email |
+| **ENABLE_2FA** | Xác minh số điện thoại/email trước khi bật làm method 2FA (SMS/EMAIL) — không áp dụng cho TOTP (verify bằng mã app, không qua OTP gửi SMS/email) |
 
 **Enum: PrivacyVisibility**
 
@@ -233,7 +234,7 @@ verify, hoặc không trả field đó, KHÔNG được tự động link — ph
 >
 > **Không lưu refresh_token dạng plaintext** — cookie giữ giá trị gốc (UUID v4), DB/Redis chỉ
 > lưu `SHA-256(refresh_token)` làm khoá tra cứu, giống cách `otp_codes.code_hash` và
-> `two_factor_auth.backup_codes_hash` đã làm. Verify bằng cách hash lại giá trị nhận từ cookie
+> `two_factor_backup_codes.codes_hash` đã làm. Verify bằng cách hash lại giá trị nhận từ cookie
 > rồi so `token_hash` — không bao giờ SELECT ngược từ hash ra giá trị gốc (là hash 1 chiều, đúng
 > ý). Lý do: nếu DB bị đọc trộm (backup leak, SQL injection, insider), refresh_token thật có
 > quyền lực tương đương password (sống 30 ngày) — không được để lộ giá trị dùng được ngay.
@@ -266,7 +267,7 @@ verify, hoặc không trả field đó, KHÔNG được tự động link — ph
 | **id** | UUID | NO | gen_random_uuid() | PK |
 | target | VARCHAR(255) | NO | – | Email hoặc phone nhận OTP |
 | code_hash | VARCHAR(255) | NO | – | SHA-256 hash của mã 6 số |
-| purpose | VARCHAR(30) | NO | – | Enum OtpPurpose |
+| purpose | SMALLINT | NO | – | Enum OtpPurpose — lưu số cố định gán tay, không phải chuỗi/ordinal, xem `skills/naming-conventions.md` #3 |
 | **user_id** | UUID FK→users | YES | NULL | Null nếu chưa tạo account |
 | attempt_count | INT | NO | 0 | Số lần nhập sai |
 | max_attempts | INT | NO | 5 | Giới hạn thử |
@@ -274,25 +275,157 @@ verify, hoặc không trả field đó, KHÔNG được tự động link — ph
 | used_at | TIMESTAMPTZ | YES | NULL | UTC – đã sử dụng |
 | created_at | TIMESTAMPTZ | NO | now() | UTC |
 
-### **ð two_factor_auth  [PostgreSQL]**
+**Khoá tạm sau khi sai đủ `max_attempts`** — chỉ khoá đúng dòng đó (DB) là chưa đủ, vì gọi lại
+`generate()` sẽ tạo dòng MỚI với `attempt_count=0`, bên verify chỉ tra dòng mới nhất
+(`findTop...OrderByCreatedAtDesc`) nên coi như giới hạn 5 lần vô nghĩa nếu cho phép xin mã mới
+ngay lập tức. Bù bằng Redis, tách khỏi vòng đời từng dòng `otp_codes`:
+```
+cache:otp_lockout:{purpose}:{target} = "1", TTL = app.otp.lockout-seconds (mặc định 1800s = 30
+phút, cấu hình qua OTP_LOCKOUT_SECONDS)
+```
+Set key này ngay khi lần sai thứ `max_attempts` xảy ra (trong `verify()`). Cả `generate()` lẫn
+`verify()` đều check key này trước, có thì chặn (`OtpLockedException` → 429 `OTP_LOCKED`) —
+chặn cả "xin mã mới" chứ không chỉ "verify mã cũ".
+
+**Tại 1 thời điểm chỉ có đúng 1 mã "sống" cho mỗi (target, purpose, user_id).** `verify()` chỉ
+tra dòng mới nhất chưa dùng (`findTop...OrderByCreatedAtDesc`) — nếu 2 request `generate()` xảy
+ra gần nhau (VD user bấm "gửi lại mã", hoặc 2 thiết bị cùng đăng nhập 1 tài khoản), mã CŨ vẫn
+còn hạn nhưng sẽ vĩnh viễn không verify được nữa vì bị mã MỚI hơn "che" mất trong query — user
+thấy như bug "mã đúng nhưng báo sai". Để tránh: `generate()` luôn `UPDATE ... SET used_at = now()`
+(gọi `OtpCodeEntity.invalidate()`, cùng cơ chế cột với `markUsed()` nhưng khác ý nghĩa — "bị ghi
+đè" chứ không phải "verify thành công") cho MỌI dòng `used_at IS NULL` cùng (target, purpose,
+user_id) NGAY TRƯỚC khi tạo dòng mới — đảm bảo tại 1 thời điểm chỉ tồn tại đúng 1 mã hợp lệ.
+
+### **ð two_factor_methods  [PostgreSQL]**
+
+Một user có thể bật ĐỒNG THỜI nhiều method (TOTP + SMS + EMAIL) — 1 dòng / (user_id, method),
+không phải 1 dòng / user. Lý do chọn multi-method thay vì chỉ 1 method độc quyền: giống cách
+Google/GitHub/Microsoft đang làm (đăng ký song song nhiều method, có "thử cách khác" lúc login
+nếu method chính không dùng được).
+
+|  |  |  |  |  |
+| :-: | :-: | :-: | :-: | :-: |
+| **Column** | **Type** | **Null** | **Default** | **Mô tả** |
+| **id** | UUID | NO | gen_random_uuid() | PK |
+| **user_id** | UUID FK→users | NO | – | Chủ method — KHÔNG unique 1 mình, unique theo cặp (user_id, method) |
+| method | VARCHAR(10) | NO | – | TOTP / SMS / EMAIL |
+| totp_secret_enc | VARCHAR(255) | YES | NULL | Encrypted TOTP secret (AES-256) — chỉ set khi method=TOTP |
+| created_at | TIMESTAMPTZ | NO | now() | UTC |
+
+Ràng buộc: `UNIQUE (user_id, method)` — 1 user không thể có 2 dòng cùng method.
+
+> **Lazy-insert, không tạo sẵn dòng lúc register.** Đại đa số user không bao giờ bật 2FA, nên
+> KHÔNG insert dòng nào mặc định cho mọi user lúc tạo tài khoản — chỉ insert khi user chủ động
+> bật 1 method cụ thể. Ở bước login, `SELECT ... WHERE user_id = ?` không trả dòng nào ⇒ coi
+> như chưa bật 2FA, bỏ qua bước 2FA, phát access_token/refresh_token thật luôn — KHÔNG được coi
+> "không có dòng nào" là lỗi hay tự động insert dòng mới ở luồng login.
+>
+> **Không tự chọn method hộ user khi có nhiều dòng.** `/auth/login` chỉ trả `available_methods`
+> (sắp xếp gợi ý theo độ mạnh **TOTP > EMAIL > SMS** — SMS dễ bị SIM-swap nhất), KHÔNG tự dispatch
+> challenge hay gửi OTP cho method nào. User phải chủ động chọn qua
+> `/auth/login/2fa/challenge` rồi Core Service mới gửi mã cho đúng method đó — xem
+> `system/05-cookie-auth-flow.md` E.9.
+
+**Luồng bật 2FA (`/2fa/*`, cần đã đăng nhập — đọc `X-User-Id` do Gateway set, không đọc lại
+JWT)** — KHÔNG insert `two_factor_methods` ngay lúc setup, chỉ insert sau khi verify đúng 1 lần,
+tránh user tự khoá mình ngoài tài khoản vì cấu hình sai:
+
+```
+POST /2fa/totp/setup    (X-User-Id)
+  → sinh secret ngẫu nhiên (20 byte) → Base32 encode
+  → lưu TẠM cache:pending_totp_secret:{user_id} (Redis, TTL 10 phút) — CHƯA ghi DB
+  ← { secret, otpauth_uri }   (client tự render QR từ otpauth_uri)
+
+POST /2fa/totp/confirm  { code }   (X-User-Id)
+  → đọc secret tạm từ Redis, tính lại mã TOTP tại thời điểm hiện tại, so với `code`
+  → đúng: INSERT two_factor_methods (method=TOTP, totp_secret_enc = encrypt(secret)), xoá key tạm
+  → sai/hết hạn: 401, không insert gì
+
+POST /2fa/email/setup   (X-User-Id)
+  → sinh + gửi OTP tới email hiện tại của user (purpose=ENABLE_2FA, dùng lại otp_codes)
+
+POST /2fa/email/confirm { code }   (X-User-Id)
+  → verify OTP (purpose=ENABLE_2FA) → đúng: INSERT two_factor_methods (method=EMAIL)
+```
+
+Gọi setup/confirm khi method đó **đã bật rồi** → 409 `METHOD_ALREADY_ENABLED`. SMS chưa có
+endpoint tương ứng (chưa triển khai `SmsTwoFactorStrategy`).
+
+**Tắt 1 method (`DELETE /2fa/{method}`, cần đã đăng nhập)**:
+
+```
+DELETE /2fa/totp   { password }   (X-User-Id)
+
+→ Verify LẠI password (KHÔNG bắt nhập mã của chính method đang xoá — lý do phổ biến nhất user
+  xoá 1 method là ĐÃ MẤT quyền truy cập nó, VD mất điện thoại cài TOTP, nên không thể bắt nhập
+  lại đúng cái vừa mất)
+→ Sai password → 401
+→ Đúng → DELETE dòng two_factor_methods tương ứng
+```
+
+Cho phép xoá hết TẤT CẢ method (kể cả method cuối cùng, không bắt buộc còn lại ≥1) — chủ đích
+giữ đơn giản, không siết chặt kiểu ngân hàng. Vì xoá 2FA là hành động nhạy cảm (kẻ tấn công
+chiếm được session tạm thời có thể tắt 2FA để giữ quyền truy cập vĩnh viễn), lẽ ra phải publish
+event cảnh báo bảo mật (`user.two_factor_disabled` qua `user.exchange`) cho Notification Service
+báo cho chủ tài khoản biết dù không phải họ tự tắt — **chưa làm** vì outbox pattern chưa wire
+cho Core Service, đang để TODO ở `TwoFactorSettingsService.disableMethod()`.
+
+### **ð two_factor_backup_codes  [PostgreSQL]**
+
+Backup codes là lưới an toàn CẤP TÀI KHOẢN, không thuộc về 1 method cụ thể nào (dùng được bất kể
+user đang bật TOTP hay SMS hay EMAIL) — nên tách bảng riêng khỏi `two_factor_methods`, không
+nhét chung vào 1 trong các dòng method.
 
 |  |  |  |  |  |
 | :-: | :-: | :-: | :-: | :-: |
 | **Column** | **Type** | **Null** | **Default** | **Mô tả** |
 | **user_id** | UUID PK FK→users | NO | – | 1-1 với users |
-| is_enabled | BOOLEAN | NO | false | Bật 2FA |
-| method | VARCHAR(10) | YES | NULL | TOTP / SMS / EMAIL |
-| totp_secret_enc | VARCHAR(255) | YES | NULL | Encrypted TOTP secret (AES-256) |
-| backup_codes_hash | TEXT[] | YES | NULL | Mảng SHA-256 hash của 8 backup codes |
-| backup_codes_used | INT | NO | 0 | Số backup code đã dùng |
+| codes_hash | TEXT[] | NO | – | Mảng SHA-256 hash của 8 backup codes |
+| codes_used | INT | NO | 0 | Số backup code đã dùng |
 | updated_at | TIMESTAMPTZ | NO | now() | UTC |
+| version | BIGINT | NO | 0 | Optimistic lock — xem lý do ở mục "Cơ chế tiêu thụ 1 mã" bên dưới |
 
-> **Lazy-insert, không tạo sẵn dòng lúc register.** Đại đa số user không bao giờ bật 2FA, nên
-> KHÔNG insert dòng `two_factor_auth` mặc định cho mọi user lúc tạo tài khoản — chỉ
-> `INSERT ... ON CONFLICT (user_id) DO UPDATE` (upsert) khi user bấm bật/tắt/đổi method 2FA lần
-> đầu. Ở bước login, `SELECT ... WHERE user_id = ?` không trả dòng nào ⇒ coi như
-> `is_enabled = false`, bỏ qua bước 2FA, phát access_token/refresh_token thật luôn — KHÔNG được
-> coi "không có dòng" là lỗi hay tự động insert dòng mới ở luồng login.
+Lazy-insert giống `two_factor_methods` — chỉ tạo dòng lúc user bật method 2FA đầu tiên (sinh
+kèm 8 backup code lúc đó), không tạo sẵn cho mọi user. `POST /2fa/totp/confirm` và
+`POST /2fa/email/confirm` trả kèm field `backupCodes` (8 mã plaintext, dạng `XXXX-XXXX`) trong
+response — CHỈ có giá trị (khác `null`) đúng 1 lần, ở lần bật method 2FA đầu tiên; bật thêm
+method thứ 2/3 sau đó thì `backupCodes` trả về `null` vì bộ mã cũ vẫn còn hiệu lực, không sinh
+lại. Plaintext code không bao giờ lưu lại bất cứ đâu sau response đó — chỉ `codes_hash` (SHA-256)
+được persist.
+
+**Cơ chế tiêu thụ 1 mã (`consume`)**: KHÔNG có cột đánh dấu "used" riêng cho từng mã trong mảng
+`codes_hash` — dùng 1 mã thì xoá hash tương ứng khỏi mảng và tăng `codes_used` lên 1, nên luôn
+đúng bất biến `codes_used = 8 - len(codes_hash)`. Cách này tận dụng đúng kiểu mảng có sẵn, không
+cần thêm cột/bảng phụ để track trạng thái từng mã.
+
+**Optimistic lock (`version`)**: `consume` đọc nguyên mảng `codes_hash`, lọc bỏ 1 phần tử trong
+memory rồi ghi đè LẠI TOÀN BỘ cột — không phải `array_remove` ở tầng SQL. Nếu 2 request verify
+chạy đồng thời cho cùng user (VD 2 thiết bị cùng login gần như cùng lúc) mà không có `version`,
+request lưu SAU sẽ ghi đè mất thay đổi của request lưu TRƯỚC (lost update) — mã đã tiêu thụ có
+thể "sống lại" thành chưa dùng. `version` (JPA `@Version`) buộc Hibernate reject UPDATE nào dựa
+trên bản đọc đã cũ; `TwoFactorBackupCodeService.verify()` bắt `OptimisticLockingFailureException`
+và tự đọc lại + verify lại tối đa 3 lần thay vì để lỗi lộ ra ngoài — an toàn vì mỗi lần retry đều
+check lại `matches()` trên mảng mới nhất, nên nếu mã vừa bị request kia tiêu thụ mất thì lần
+retry sẽ đúng đắn trả về sai (không consume trùng).
+
+**Regenerate**: `POST /2fa/backup-codes/regenerate  { password }` (X-User-Id) — bắt buộc re-auth
+bằng password (cùng lý do với xoá method ở trên: session bị chiếm tạm thời không được tự cấp cho
+mình 1 bộ backup code mới). Yêu cầu tài khoản đang có ít nhất 1 method 2FA bật (không thì trả lỗi
+`METHOD_NOT_ENABLED`). Sinh 8 mã hoàn toàn mới, GHI ĐÈ toàn bộ — mã cũ (kể cả mã cũ chưa dùng) vô
+hiệu ngay lập tức, không có kiểu "top-up" thêm mã lẻ. User có thể gọi endpoint này bất kỳ lúc nào,
+không bắt buộc phải dùng hết 8 mã mới cho gọi (VD: lỡ chụp màn hình mã cũ, đổi máy...). Trả về
+cùng format `{ backupCodes: [...] }` như lúc bật method đầu tiên.
+> TODO chưa làm (giống TODO ở mục xoá method trên): regenerate cũng là hành động nhạy cảm, lẽ ra
+> phải publish security alert cho chủ tài khoản biết — chưa làm vì outbox pattern chưa wire cho
+> Core Service.
+
+**Verify lúc login (`/auth/login/2fa`)**: backup code là 1 nhánh ngang hàng với TOTP/SMS/EMAIL ở
+bước chọn method (`/auth/login/2fa/challenge`), nhưng KHÔNG phải 1 giá trị của enum
+`TwoFactorMethod` — đây là pseudo-method `"BACKUP_CODE"` xử lý riêng ở `AuthServiceImpl`, không
+đi qua `TwoFactorChallengeDispatcher`/`TwoFactorMethodEntity` vì backup code không có dòng config
+riêng trong `two_factor_methods`. Chỉ xuất hiện trong `available_methods` trả về ở bước 1 nếu tài
+khoản đã có `two_factor_backup_codes` (tức đã từng bật ít nhất 1 method 2FA). Verify đúng → tiêu
+thụ 1 mã (xem cơ chế `consume` ở trên) → phát access/refresh token thật như các method khác.
 
 ### **ð user_privacy_settings  [PostgreSQL]**
 

@@ -2,8 +2,9 @@
 
 ## **E.0 Tổng quan cơ chế**
 
-Hệ thống dùng 2 token, tách vai trò rõ ràng, cả 2 đều truyền qua cookie (không phải header
-`Authorization`, không phải body):
+Hệ thống dùng 3 token, tách vai trò rõ ràng, CẢ 3 đều truyền qua cookie (không phải header
+`Authorization`, không phải body) — nhất quán 1 cơ chế xuyên suốt, không trộn "chỗ này cookie,
+chỗ kia trả token qua body":
 
 | Token | Loại | TTL | Lưu ở đâu | Ai verify |
 |---|---|---|---|---|
@@ -18,15 +19,15 @@ revoke ngay khi logout/block, và bù lại độ trễ revoke của access toke
 
 ## **E.1 Cấu hình Cookie**
 
-| | `access_token` | `refresh_token` |
-|---|---|---|
-| **HttpOnly** | true | true |
-| **Secure** | true | true |
-| **SameSite** | Strict | Strict |
-| **Path** | `/` | `/auth/refresh` (chỉ gửi lên đúng endpoint refresh, giảm bề mặt lộ token) |
-| **Domain** | `.chatapp.com` | `.chatapp.com` |
-| **Max-Age** | 900 (15 phút) | 2592000 (30 ngày) |
-| **Giá trị** | JWT (`header.payload.signature`) | UUID v4 ngẫu nhiên |
+| | `access_token` | `refresh_token` | `pre_auth_token` |
+|---|---|---|---|
+| **HttpOnly** | true | true | true |
+| **Secure** | true | true | true |
+| **SameSite** | Strict | Strict | Strict |
+| **Path** | `/` | `/auth/refresh` (chỉ gửi lên đúng endpoint refresh, giảm bề mặt lộ token) | `/auth/login/2fa` (match cả `/auth/login/2fa` và `/auth/login/2fa/challenge` — cookie path match theo prefix, RFC 6265) |
+| **Domain** | `.chatapp.com` | `.chatapp.com` | `.chatapp.com` |
+| **Max-Age** | 900 (15 phút) | 2592000 (30 ngày) | 300 (5 phút, khớp TTL Redis) |
+| **Giá trị** | JWT (`header.payload.signature`) | UUID v4 ngẫu nhiên | UUID v4 ngẫu nhiên |
 
 ## **E.2 JWT `access_token` — cấu trúc claim**
 
@@ -162,39 +163,82 @@ Vấn đề cần tránh: nếu phát access_token/refresh_token thật ngay sau
 (trước khi verify mã 2FA), toàn bộ mục đích của 2FA bị vô hiệu hoá — chỉ cần đúng password là
 coi như đăng nhập xong, mã 2FA chỉ là bước UI thừa. Vì vậy bắt buộc có 1 trạng thái trung gian:
 
+3 bước — KHÔNG tự ý chọn method hộ user và KHÔNG gửi OTP cho tới khi user chủ động chọn (tự
+động chọn "method mạnh nhất" rồi gửi SMS/email ngay lúc login là sai: user có thể đang không
+cầm điện thoại cài TOTP, muốn dùng ngay method khác — tự gửi trước khi hỏi vừa tốn phí SMS/email
+vô ích vừa sai ý user; đây là cách Google/GitHub thực tế đang làm — hỏi chọn trước, gửi mã sau):
+
+**Bước 1 — verify password, biết CÓ bật 2FA hay không, CHƯA gửi mã nào:**
+
 ```
-POST /auth/login  { email, password }
+POST /auth/login  { identifier, password }
 
 → Core Service verify password đúng
-→ Kiểm tra two_factor_auth.is_enabled = true
+→ Đọc two_factor_methods WHERE user_id = ? — có ít nhất 1 dòng ⇒ đã bật 2FA (multi-method, xem
+  `03-core-service.md` mục two_factor_methods)
 → KHÔNG tạo access_token/refresh_token ở bước này
+→ KHÔNG chọn method hộ, KHÔNG dispatch challenge, KHÔNG gửi OTP nào ở bước này
 → Tạo pre_auth_token (UUID v4), lưu Redis:
   cache:pre_auth:{pre_auth_token} = { user_id }, TTL 5 phút, KHÔNG lưu DB (sống quá ngắn, không
   cần bền vững)
 
-← HTTP 200 { requires_2fa: true, pre_auth_token: "<uuid>", method: "TOTP" }
-  (KHÔNG Set-Cookie access_token/refresh_token ở response này)
+← HTTP 200 { requires_2fa: true, available_methods: ["TOTP", "EMAIL"] }   (sắp xếp theo độ mạnh
+  TOTP > EMAIL > SMS để client gợi ý mặc định, nhưng KHÔNG tự chọn hộ)
+  Set-Cookie: pre_auth_token=<uuid>; HttpOnly; Secure; SameSite=Strict; Path=/auth/login/2fa;
+  Max-Age=300   (KHÔNG Set-Cookie access_token/refresh_token ở response này, và KHÔNG trả
+  pre_auth_token trong body — cùng 1 cơ chế cookie như access/refresh_token, xem E.0/E.1)
 ```
 
-```
-POST /auth/login/2fa  { pre_auth_token, code }
+**Bước 2 — user chọn method, Core Service mới dispatch/gửi mã cho đúng method đó:**
 
-→ Core Service: Redis GET cache:pre_auth:{pre_auth_token} — không tồn tại/hết hạn → 401,
-  bắt đăng nhập lại từ đầu (không cho thử lại vô hạn với cùng 1 pre_auth_token)
-→ Verify code (TOTP/OTP/backup code) đúng cách như trước
+```
+POST /auth/login/2fa/challenge  { method }
+  Cookie: pre_auth_token=<uuid>   ← browser tự đính kèm (Path=/auth/login/2fa)
+
+→ Core Service: Redis GET cache:pre_auth:{pre_auth_token} — không tồn tại/hết hạn → 401 (thiếu
+  cookie thì coi như không có, không xử lý gì thêm, trả lỗi thẳng)
+→ Verify `method` nằm trong danh sách method đã bật của user (không cho challenge method chưa
+  từng bật)
+→ Dispatch challenge theo đúng method: TOTP không gửi gì (user tự mở app); SMS/EMAIL sinh OTP,
+  INSERT otp_codes (purpose=LOGIN_2FA), gửi SMS/email
+→ Redis SET lại cache:pre_auth:{pre_auth_token} = { user_id, method } (GIỮ NGUYÊN pre_auth_token
+  và TTL còn lại — không cấp token mới, không set lại cookie). Gọi lại endpoint này với method
+  khác = đổi sang method đó (dùng chung 1 endpoint cho cả lần chọn đầu tiên lẫn "thử cách khác")
+
+← HTTP 200 { method: "EMAIL", message: "Code sent" }
+```
+
+**Bước 3 — nộp mã, phát token thật:**
+
+```
+POST /auth/login/2fa  { code }
+  Cookie: pre_auth_token=<uuid>
+
+→ Core Service: Redis GET cache:pre_auth:{pre_auth_token} — không tồn tại/hết hạn, hoặc chưa
+  từng gọi bước 2 (không có `method` trong cache) → 401
+→ Verify code theo đúng `method` lưu trong cache (TOTP tính lại từ secret / SMS-EMAIL tra
+  `otp_codes` / backup code tra `two_factor_backup_codes` — `method` lúc này là chuỗi
+  `"BACKUP_CODE"`, KHÔNG phải giá trị của enum TwoFactorMethod, vì backup code không có dòng
+  config riêng trong `two_factor_methods`; xem chi tiết mục "Verify lúc login" ở
+  `services/03-core-service.md`)
 → Redis DEL cache:pre_auth:{pre_auth_token} ngay (dùng 1 lần, không tái sử dụng)
 → Tạo refresh_token + access_token THẬT như luồng bình thường (mục E.3)
 
 ← HTTP 200 + Set-Cookie access_token + refresh_token
+  Set-Cookie: pre_auth_token=; Max-Age=0; Path=/auth/login/2fa   (clear ngay sau khi dùng xong,
+  giống cách logout clear access/refresh_token — mục E.7)
 ```
 
 **Quy tắc cứng:**
-- `pre_auth_token` chỉ dùng được đúng 1 lần, cho đúng 1 mục đích (nộp mã 2FA) — không phải
-  access token rút gọn, không mang bất kỳ quyền truy cập nghiệp vụ nào khác.
-- Sai mã 2FA quá số lần cho phép (dùng lại `max_attempts` kiểu như `otp_codes`) → xoá luôn
-  `pre_auth_token`, bắt đăng nhập lại từ bước nhập password.
-- Endpoint `/auth/login/2fa` không đọc `X-User-Id` hay bất kỳ cookie auth nào — toàn bộ danh
-  tính lấy từ `pre_auth_token`, vì tại thời điểm này user CHƯA được coi là đã đăng nhập.
+- `pre_auth_token` chỉ dùng được đúng 1 lần cho đúng 1 phiên login — không phải access token
+  rút gọn, không mang bất kỳ quyền truy cập nghiệp vụ nào khác.
+- Bước 3 mà cache chưa có `method` (user gọi thẳng `/auth/login/2fa` mà bỏ qua bước 2) → 401,
+  bắt gọi `/auth/login/2fa/challenge` trước.
+- Sai mã 2FA quá số lần cho phép (dùng lại `max_attempts` kiểu như `otp_codes`) → xoá
+  `cache:pre_auth:{token}` + clear cookie (`Max-Age=0`), bắt đăng nhập lại từ bước nhập password.
+- Endpoint `/auth/login/2fa/challenge` và `/auth/login/2fa` không đọc `X-User-Id` hay
+  `access_token`/`refresh_token` cookie — toàn bộ danh tính lấy từ `pre_auth_token` cookie, vì
+  tại thời điểm này user CHƯA được coi là đã đăng nhập.
 
 ## **E.10 Thu thập IP / thiết bị / địa điểm lúc login — ghi vào `user_sessions`**
 

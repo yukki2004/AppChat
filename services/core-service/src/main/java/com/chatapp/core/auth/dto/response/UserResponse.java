@@ -2,7 +2,7 @@ package com.chatapp.core.auth.dto.response;
 
 import java.util.UUID;
 
-import com.chatapp.core.user.UserEntity;
+import com.chatapp.core.base.entity.UserEntity;
 
 import lombok.Value;
 

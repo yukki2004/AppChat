@@ -8,8 +8,9 @@ import lombok.Setter;
 @Setter
 public class LoginRequest {
 
+    /** Username, email, or phone number — looked up in that order in AuthServiceImpl. */
     @NotBlank
-    private String usernameOrEmail;
+    private String identifier;
 
     @NotBlank
     private String password;

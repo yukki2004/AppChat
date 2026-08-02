@@ -24,6 +24,10 @@ services/*/vendor/
 # RSA key tự gen lúc dev (JwtKeyManager) — không bao giờ commit private key
 services/*/keys/
 
+# MaxMind GeoLite2 .mmdb — vài chục MB, tải riêng từng máy qua tài khoản MaxMind của bạn
+# (xem docs/.../system/05-cookie-auth-flow.md mục E.10), không phải asset của repo
+services/*/geoip/*.mmdb
+
 # IDE
 .idea/
 .vscode/

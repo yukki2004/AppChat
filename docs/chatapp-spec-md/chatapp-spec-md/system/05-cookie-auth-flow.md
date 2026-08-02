@@ -265,6 +265,26 @@ POST /auth/login/2fa  { code }
   không bao giờ cache vĩnh viễn 1 bản build một lần rồi quên update.
 - Độ chính xác chỉ ở mức thành phố/quốc gia — đây là giới hạn thật của GeoIP, không cố suy ra
   địa chỉ cụ thể hơn.
+- **Implement**: `GeoIpService` (`com.chatapp.core.geoip`) load file `.mmdb` từ đường dẫn cấu
+  hình `app.geoip.mmdb-path`, mặc định `${GEOIP_MMDB_PATH:./geoip/GeoLite2-City.mmdb}` — override
+  bằng env `GEOIP_MMDB_PATH` khi cần path khác. Thiếu file/đường dẫn rỗng KHÔNG làm service
+  crash — chỉ log warning và mọi lookup trả về rỗng (`login_country`/`login_city` = `null`),
+  cùng triết lý graceful-degradation với `TotpSecretCipher` (dev/local không bắt buộc phải có
+  file `.mmdb` vài chục MB, và file cũ/hỏng ở prod không được phép làm sập luôn cả luồng login).
+  File `.mmdb` thật (tải từ MaxMind, cần free license key) KHÔNG commit vào repo (đã gitignore
+  `services/*/geoip/*.mmdb`) — mỗi máy tự tải về đặt đúng `services/core-service/geoip/
+  GeoLite2-City.mmdb` (path mặc định ở trên) nếu muốn geo lookup chạy thật ở local; nếu không có
+  file, service tự fallback về `null`/`null` như mô tả ở trên, không cần set gì thêm.
+- `login_country` lấy đúng `country.isoCode` (VARCHAR(2), VD "VN") từ response của thư viện
+  `geoip2`, KHÔNG lấy `country.name` (tên đầy đủ dạng "Vietnam") — đúng kiểu cột đã chốt trong
+  bảng `user_sessions` ở `03-core-service.md`.
+
+**Audit log (`login_audit_logs`, chức năng #29)**: `LoginAuditLogService`
+(`com.chatapp.core.audit`) — 1 method `record(...)` gọi tường minh tại từng call site
+(`AuthServiceImpl.login()`/`verifyTwoFactor()`/`issueTokens()`), không dùng AOP/event listener,
+vì các action khác nhau cần field khác nhau (LOGIN_FAILED không có `user_id` nếu identifier
+không tồn tại; PASSWORD_CHANGE/LOGOUT/SESSION_REVOKE — CHƯA có call site vì các endpoint
+logout/đổi password chưa được implement) — chỉ mới ghi được `LOGIN_SUCCESS`/`LOGIN_FAILED`.
 
 **Thiết bị (`device_id`, `device_name`, `platform`) — nguồn khác nhau theo platform, KHÔNG có
 cách server tự lấy chung cho cả web và mobile:**

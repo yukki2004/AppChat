@@ -38,9 +38,11 @@
       <artifactId>postgresql</artifactId>
       <scope>runtime</scope>
     </dependency>
+    <!-- Spring Boot 4 moved Flyway autoconfiguration out of spring-boot-autoconfigure into
+         its own starter — flyway-core alone on the classpath does NOT wire it up anymore. -->
     <dependency>
-      <groupId>org.flywaydb</groupId>
-      <artifactId>flyway-core</artifactId>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-flyway</artifactId>
     </dependency>
     <dependency>
       <groupId>org.flywaydb</groupId>
@@ -51,17 +53,50 @@
       <artifactId>nimbus-jose-jwt</artifactId>
       <version>10.9.1</version>
     </dependency>
-    <!-- Chỉ lấy BCryptPasswordEncoder, KHÔNG dùng spring-boot-starter-security (Gateway đã lo
-         verify JWT — Core Service không cần filter chain/basic auth mặc định của Spring Security) -->
+    <!-- BCryptPasswordEncoder only, NOT spring-boot-starter-security (Gateway already verifies
+         JWT — Core Service doesn't need Spring Security's default filter chain/basic auth) -->
     <dependency>
       <groupId>org.springframework.security</groupId>
       <artifactId>spring-security-crypto</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-data-redis</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-mail</artifactId>
+    </dependency>
+    <!-- RFC 6238 TOTP generation/verification -->
+    <dependency>
+      <groupId>com.eatthepath</groupId>
+      <artifactId>java-otp</artifactId>
+      <version>0.4.0</version>
+    </dependency>
+    <!-- Base32 encode/decode for TOTP secrets -->
+    <dependency>
+      <groupId>commons-codec</groupId>
+      <artifactId>commons-codec</artifactId>
+    </dependency>
+    <!-- Offline IP -> country/city lookup against a self-hosted GeoLite2-City .mmdb file, no
+         3rd-party API call per login (see docs/.../system/05-cookie-auth-flow.md mục E.10) -->
+    <dependency>
+      <groupId>com.maxmind.geoip2</groupId>
+      <artifactId>geoip2</artifactId>
+      <version>4.2.1</version>
     </dependency>
     <dependency>
       <groupId>org.projectlombok</groupId>
       <artifactId>lombok</artifactId>
       <version>1.18.46</version>
       <optional>true</optional>
+    </dependency>
+    <!-- OpenAPI/Swagger UI, auto-generated from @RestController + DTOs, no manual YAML to
+         maintain — every service in the repo is expected to expose this (see root CLAUDE.md). -->
+    <dependency>
+      <groupId>org.springdoc</groupId>
+      <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+      <version>2.8.5</version>
     </dependency>
     <dependency>
       <groupId>org.springframework.boot</groupId>

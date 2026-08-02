@@ -13,11 +13,36 @@ spring:
   jpa:
     hibernate:
       ddl-auto: validate
+  jackson:
+    property-naming-strategy: SNAKE_CASE
   flyway:
     enabled: true
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+  mail:
+    host: ${MAIL_HOST:smtp.gmail.com}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail.smtp.auth: true
+      mail.smtp.starttls.enable: true
 
 app:
   cookie-domain: ${COOKIE_DOMAIN:}
+  otp:
+    mail-from: ${OTP_MAIL_FROM:no-reply@chatapp.com}
+    code-ttl-seconds: ${OTP_CODE_TTL_SECONDS:300}
+    max-attempts: ${OTP_MAX_ATTEMPTS:5}
+    lockout-seconds: ${OTP_LOCKOUT_SECONDS:1800}
+  totp:
+    secret-encryption-key: ${TOTP_SECRET_ENCRYPTION_KEY:}
+    issuer: ${TOTP_ISSUER:ChatApp}
+  geoip:
+    mmdb-path: ${GEOIP_MMDB_PATH:./geoip/GeoLite2-City.mmdb}
 
 jwt:
   private-key-path: ${JWT_PRIVATE_KEY_PATH:./keys/private_key.pem}

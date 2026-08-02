@@ -1,34 +1,59 @@
 package com.chatapp.core.exception;
 
-import java.util.Map;
-
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+import com.chatapp.core.base.ApiResponse;
+
+/** Every error is returned via {@link ApiResponse#fail} — same envelope as a success response. */
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
     @ExceptionHandler(DuplicateUserException.class)
-    public ResponseEntity<Map<String, String>> handleDuplicateUser(DuplicateUserException ex) {
+    public ResponseEntity<ApiResponse<Void>> handleDuplicateUser(DuplicateUserException ex) {
         return ResponseEntity.status(HttpStatus.CONFLICT)
-                .body(Map.of("error_code", "USER_ALREADY_EXISTS", "message", ex.getMessage()));
+                .body(ApiResponse.fail("USER_ALREADY_EXISTS", ex.getMessage()));
     }
 
     @ExceptionHandler(InvalidCredentialsException.class)
-    public ResponseEntity<Map<String, String>> handleInvalidCredentials(InvalidCredentialsException ex) {
+    public ResponseEntity<ApiResponse<Void>> handleInvalidCredentials(InvalidCredentialsException ex) {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                .body(Map.of("error_code", "INVALID_CREDENTIALS", "message", ex.getMessage()));
+                .body(ApiResponse.fail("INVALID_CREDENTIALS", ex.getMessage()));
+    }
+
+    @ExceptionHandler(TwoFactorMethodNotEnabledException.class)
+    public ResponseEntity<ApiResponse<Void>> handleTwoFactorMethodNotEnabled(TwoFactorMethodNotEnabledException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(ApiResponse.fail("METHOD_NOT_ENABLED", ex.getMessage()));
+    }
+
+    @ExceptionHandler(TwoFactorMethodAlreadyEnabledException.class)
+    public ResponseEntity<ApiResponse<Void>> handleTwoFactorMethodAlreadyEnabled(TwoFactorMethodAlreadyEnabledException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.fail("METHOD_ALREADY_ENABLED", ex.getMessage()));
+    }
+
+    @ExceptionHandler(OtpLockedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleOtpLocked(OtpLockedException ex) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .body(ApiResponse.fail("OTP_LOCKED", ex.getMessage()));
+    }
+
+    @ExceptionHandler(UnsupportedOperationException.class)
+    public ResponseEntity<ApiResponse<Void>> handleUnsupported(UnsupportedOperationException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED)
+                .body(ApiResponse.fail("NOT_IMPLEMENTED", ex.getMessage()));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<Map<String, String>> handleValidation(MethodArgumentNotValidException ex) {
+    public ResponseEntity<ApiResponse<Void>> handleValidation(MethodArgumentNotValidException ex) {
         String message = ex.getBindingResult().getFieldErrors().isEmpty()
                 ? "Invalid request"
                 : ex.getBindingResult().getFieldErrors().get(0).getField() + " " + ex.getBindingResult().getFieldErrors().get(0).getDefaultMessage();
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                .body(Map.of("error_code", "VALIDATION_ERROR", "message", message));
+                .body(ApiResponse.fail("VALIDATION_ERROR", message));
     }
 }

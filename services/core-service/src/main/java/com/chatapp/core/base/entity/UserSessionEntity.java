@@ -1,4 +1,4 @@
-package com.chatapp.core.auth.entity;
+package com.chatapp.core.base.entity;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -15,8 +15,7 @@ import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
 /**
- * Lưu refresh_token — KHÔNG BAO GIỜ lưu giá trị gốc, chỉ lưu token_hash = SHA-256(refresh_token).
- * Xem `docs/.../services/03-core-service.md` mục user_sessions và `05-cookie-auth-flow.md`.
+ * Stores the refresh_token — NEVER the raw value, only token_hash = SHA-256(refresh_token).
  */
 @Entity
 @Table(name = "user_sessions")
@@ -49,6 +48,12 @@ public class UserSessionEntity {
     @Column(name = "user_agent")
     private String userAgent;
 
+    @Column(name = "login_country", length = 2)
+    private String loginCountry;
+
+    @Column(name = "login_city")
+    private String loginCity;
+
     @Column(name = "is_active", nullable = false)
     private boolean isActive;
 
@@ -67,11 +72,14 @@ public class UserSessionEntity {
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
-    public UserSessionEntity(String tokenHash, UUID userId, String ipAddress, String userAgent, Instant expiresAt) {
+    public UserSessionEntity(String tokenHash, UUID userId, String ipAddress, String userAgent,
+                              String loginCountry, String loginCity, Instant expiresAt) {
         this.tokenHash = tokenHash;
         this.userId = userId;
         this.ipAddress = ipAddress;
         this.userAgent = userAgent;
+        this.loginCountry = loginCountry;
+        this.loginCity = loginCity;
         this.expiresAt = expiresAt;
         this.isActive = true;
         Instant now = Instant.now();

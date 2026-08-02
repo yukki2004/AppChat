@@ -1,4 +1,4 @@
-package com.chatapp.core.user;
+package com.chatapp.core.base.entity;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -15,6 +15,8 @@ import lombok.NoArgsConstructor;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
+/** Shared across domains (auth, twofactor, and later profile/friend/block/privacy...) — lives
+ *  under common/, not any single domain package. */
 @Entity
 @Table(name = "users")
 @Getter
@@ -89,9 +91,10 @@ public class UserEntity {
     @Column(name = "deleted_at")
     private Instant deletedAt;
 
-    public UserEntity(String username, String email, String passwordHash, String displayName) {
+    public UserEntity(String username, String email, String phone, String passwordHash, String displayName) {
         this.username = username;
         this.email = email;
+        this.phone = phone;
         this.passwordHash = passwordHash;
         this.displayName = displayName;
         this.isPrivate = false;

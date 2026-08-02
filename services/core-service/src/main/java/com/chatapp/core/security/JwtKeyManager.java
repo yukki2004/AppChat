@@ -16,6 +16,9 @@ import java.util.Base64;
 
 import org.springframework.stereotype.Component;
 
+import com.chatapp.core.base.config.JwtProperties;
+import com.nimbusds.jose.JWSAlgorithm;
+import com.nimbusds.jose.jwk.KeyUse;
 import com.nimbusds.jose.jwk.RSAKey;
 
 import jakarta.annotation.PostConstruct;
@@ -23,9 +26,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Gen 1 lần lúc thiếu file, sau đó luôn ĐỌC lại từ disk lúc khởi động — không gen key mới mỗi
- * lần restart (sẽ khiến mọi access_token cũ ký bằng key trước đó lập tức verify fail).
- * Xem giải thích cơ chế đầy đủ trong lịch sử trao đổi ở `skills/authentication.md`.
+ * Generates the key pair once when missing, then always reloads from disk on startup —
+ * never regenerates on restart, or every access_token signed with the previous key would
+ * instantly fail verification.
  */
 @Component
 @RequiredArgsConstructor
@@ -44,22 +47,22 @@ public class JwtKeyManager {
 
         if (Files.exists(privateKeyPath) && Files.exists(publicKeyPath)) {
             this.rsaKey = loadFromDisk(privateKeyPath, publicKeyPath);
-            log.info("Đã load cặp RSA key hiện có từ '{}' / '{}' (kid={})",
+            log.info("Loaded existing RSA key pair from '{}' / '{}' (kid={})",
                     privateKeyPath, publicKeyPath, properties.getKeyId());
         } else {
             this.rsaKey = generateAndPersist(privateKeyPath, publicKeyPath);
-            log.warn("Chưa có cặp RSA key — đã TỰ GEN mới và lưu vào '{}' / '{}' (kid={}). "
-                            + "Chỉ chấp nhận được cho dev/local — production phải dùng key thật quản lý qua secret manager.",
+            log.warn("No RSA key pair found — generated a new one and saved to '{}' / '{}' (kid={}). "
+                            + "Only acceptable for dev/local — production must use a real key managed via a secret manager.",
                     privateKeyPath, publicKeyPath, properties.getKeyId());
         }
     }
 
-    /** Key đầy đủ (private+public) dùng để KÝ access token — chỉ JwtTokenProvider dùng. */
+    /** Full key (private+public) used to SIGN access tokens — only JwtTokenProvider uses this. */
     public RSAKey getSigningKey() {
         return rsaKey;
     }
 
-    /** Chỉ phần public — dùng để trả về ở JWKS endpoint, KHÔNG bao giờ lộ private key. */
+    /** Public part only — returned by the JWKS endpoint, never exposes the private key. */
     public RSAKey getPublicJwk() {
         return rsaKey.toPublicJWK();
     }
@@ -75,6 +78,8 @@ public class JwtKeyManager {
         return new RSAKey.Builder(publicKey)
                 .privateKey(privateKey)
                 .keyID(properties.getKeyId())
+                .algorithm(JWSAlgorithm.RS256)
+                .keyUse(KeyUse.SIGNATURE)
                 .build();
     }
 
@@ -92,6 +97,8 @@ public class JwtKeyManager {
         return new RSAKey.Builder((RSAPublicKey) keyPair.getPublic())
                 .privateKey((RSAPrivateKey) keyPair.getPrivate())
                 .keyID(properties.getKeyId())
+                .algorithm(JWSAlgorithm.RS256)
+                .keyUse(KeyUse.SIGNATURE)
                 .build();
     }
 

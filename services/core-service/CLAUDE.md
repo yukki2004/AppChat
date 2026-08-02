@@ -37,36 +37,49 @@ tạo nhóm, QR/invite link, duyệt thành viên, phân quyền OWNER/ADMIN/MEM
 nhóm** · **file/folder chung của nhóm** (chỉ lưu tham chiếu `media_upload_id`, không lưu file
 thật) · **sự kiện/lịch hẹn nhóm + nhắc nhở** · **last_seen bền vững**.
 
-## Cấu trúc thư mục — package theo DOMAIN trước, layer sau (không package-by-type)
+## Cấu trúc thư mục — Entity/Repository/Config/Enum tập trung ở `base/`, phần còn lại theo domain
 
-Core Service gộp rất nhiều domain (auth, profile, friend, block, privacy, group...) nên package
-theo loại (`controller/` chứa hết mọi controller, `service/` chứa hết mọi service...) sẽ phồng to
-khó điều hướng. Thay vào đó mỗi domain tự đóng gói đủ Controller+Service+Repository+DTO của
-riêng nó — thêm domain mới = thêm 1 package mới, không đụng file domain khác. Bên TRONG mỗi domain
-vẫn giữ nguyên layer Controller → Service → Repository như bình thường.
+Core Service gộp rất nhiều domain (auth, profile, friend, block, privacy, group...). Quyết định
+hiện tại (áp dụng cho Core Service trước, các service Java khác — messaging/social — chưa chốt,
+tự quyết riêng khi tới lượt): **Entity, Repository, Enum lưu DB, và class `@Configuration`/
+`@ConfigurationProperties` đều tập trung hết vào `base/`, bất kể chỉ 1 domain hay nhiều domain
+dùng** — không còn kiểu "domain nào tự lo Entity/Repository của domain đó". Controller/Service/
+DTO/Strategy thì vẫn theo domain như cũ, thêm domain mới = thêm 1 package mới cho phần này.
 
 ```
 com.chatapp.core/
 ├── CoreServiceApplication.java
-├── user/                     # UserEntity/UserRepository dùng CHUNG bởi auth/profile/friend...
-├── auth/                     # register/login/logout/refresh, session (KHÔNG gộp OAuth/2FA vào)
-│   ├── AuthController.java
-│   ├── AuthService.java (interface) / impl/AuthServiceImpl.java
-│   ├── dto/request/, dto/response/
-│   ├── entity/UserSessionEntity.java
-│   └── repository/UserSessionRepository.java
-├── profile/, friend/, block/, privacy/    # thêm sau, cùng khuôn mẫu như auth/
+├── base/                      # hạ tầng dùng chung — KHÔNG phải 1 domain nghiệp vụ
+│   ├── entity/                 # UserEntity, UserSessionEntity, TwoFactorMethodEntity, OtpCodeEntity...
+│   ├── repository/             # UserRepository, UserSessionRepository, TwoFactorMethodRepository...
+│   ├── constant/                # TwoFactorMethod, OtpPurpose (+ OtpPurposeConverter — số cố định gán
+│   │                            # tay, xem skills/naming-conventions.md #3), RedisKeys, RoutingKeys
+│   ├── config/                  # JwtProperties, OtpProperties, TotpProperties, PasswordEncoderConfig
+│   └── ApiResponse.java, ApiError.java   # response envelope chung cho MỌI endpoint (trừ /health)
+├── auth/                      # register/login + luồng login-2FA (challenge/submit) — Controller/
+│   │                            # Service/DTO/PreAuthTokenService, KHÔNG có Entity/Repository riêng
+│   ├── AuthController.java, AuthService.java (interface) / impl/AuthServiceImpl.java
+│   ├── PreAuthTokenService.java
+│   └── dto/request/, dto/response/
+├── twofactor/                 # strategy verify theo method (TOTP/EMAIL, SMS chưa làm) + luồng bật
+│   │                            # 2FA (/2fa/*) — cũng KHÔNG có Entity/Repository riêng
+│   ├── TwoFactorSettingsController.java / TwoFactorSettingsService.java
+│   ├── TwoFactorChallengeDispatcher.java / TwoFactorChallengeStrategy.java (+ Totp.../Email... impl)
+│   └── OtpCodeService.java, OtpMailSender.java, TotpSecretCipher.java, TotpCodeVerifier.java
+├── profile/, friend/, block/, privacy/    # thêm sau, cùng khuôn mẫu (Controller/Service/DTO —
+│                              # Entity/Repository mới thêm vào base/, không tạo trong domain)
 ├── group/                    # domain nặng nhất — có thể lại chia sub-package member/, file/, event/
-├── security/                 # JwtKeyManager, JwtTokenProvider, JwksController — hạ tầng dùng CHUNG,
-│                              # không thuộc riêng domain nào
-├── grpc/                     # IdentityGrpcService, GroupGrpcService (expose sau)
-├── config/
-└── exception/                # GlobalExceptionHandler + custom exception
+├── security/                  # JwtKeyManager, JwtTokenProvider, JwksController — chỉ còn đúng phần
+│                              # ký/verify JWT thật, không chứa Entity/Config (đã dời sang base/)
+├── grpc/                      # IdentityGrpcService, GroupGrpcService (expose sau)
+└── exception/                 # GlobalExceptionHandler + custom exception
 ```
 
-Quy tắc: domain nào cần `UserEntity` thì import từ `user/`, KHÔNG copy field hay tạo entity
-riêng. `security/` không phải 1 domain nghiệp vụ — nó là hạ tầng ký/verify JWT dùng chung cho
-mọi domain, nên tách riêng khỏi `auth/` (domain `auth/` gọi vào `security/`, không tự ký JWT).
+Quy tắc: domain nào cần `UserEntity`/`UserRepository` thì import từ `base/entity/`, `base/
+repository/` — KHÔNG copy field hay tạo entity riêng, kể cả entity chỉ domain đó dùng
+(`TwoFactorMethodEntity`, `OtpCodeEntity` cũng nằm ở `base/` dù chỉ `twofactor/` dùng tới).
+`security/` không phải 1 domain nghiệp vụ — nó là hạ tầng ký/verify JWT dùng chung cho mọi
+domain, nên tách riêng khỏi `auth/` (domain `auth/` gọi vào `security/`, không tự ký JWT).
 
 ## Lưu ý khi code — 12 điểm dễ sai đã phát hiện lúc review spec
 

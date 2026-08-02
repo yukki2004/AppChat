@@ -1,11 +1,11 @@
-package com.chatapp.core.auth.repository;
+package com.chatapp.core.base.repository;
 
 import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 
-import com.chatapp.core.auth.entity.UserSessionEntity;
+import com.chatapp.core.base.entity.UserSessionEntity;
 
 public interface UserSessionRepository extends JpaRepository<UserSessionEntity, UUID> {
 

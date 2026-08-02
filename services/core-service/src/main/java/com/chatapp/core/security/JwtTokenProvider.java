@@ -6,6 +6,7 @@ import java.util.UUID;
 
 import org.springframework.stereotype.Component;
 
+import com.chatapp.core.base.config.JwtProperties;
 import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.JWSAlgorithm;
 import com.nimbusds.jose.JWSHeader;
@@ -16,8 +17,8 @@ import com.nimbusds.jwt.SignedJWT;
 import lombok.RequiredArgsConstructor;
 
 /**
- * Ký access_token (JWT RS256). Payload CHỈ chứa sub/jti/iat/exp — không nhét claim nghiệp vụ
- * (role, display_name...) theo đúng quy định ở `docs/.../05-cookie-auth-flow.md` mục E.2.
+ * Signs the access_token (JWT RS256). Payload contains ONLY sub/jti/iat/exp — no business
+ * claims (role, display_name...) that could go stale before the token expires.
  */
 @Component
 @RequiredArgsConstructor
@@ -47,7 +48,7 @@ public class JwtTokenProvider {
 
             return signedJwt.serialize();
         } catch (JOSEException e) {
-            throw new IllegalStateException("Không ký được access token", e);
+            throw new IllegalStateException("Failed to sign access token", e);
         }
     }
 

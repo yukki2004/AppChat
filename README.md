@@ -63,3 +63,8 @@ Chạy lại bao nhiêu lần cũng an toàn — chỉ `CREATE ROLE`/`CREATE DAT
 `.env.stg.example` / `.env.prod.example` làm mẫu (copy thành `.env.stg`/`.env.prod` thật, điền
 password thật, KHÔNG commit file đã điền). Production override không map port nào ra host —
 service app kết nối qua tên container trong network nội bộ `chatapp-infra`.
+
+## Chạy 1 service + test luồng auth/2FA end-to-end
+
+Xem **`RUNNING.md`** ở repo root — hướng dẫn chạy từng service (`./scripts/run-service.sh`),
+test qua `test-client/`, và bảng lỗi hay gặp lúc setup.

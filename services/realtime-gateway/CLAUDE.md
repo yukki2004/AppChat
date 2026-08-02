@@ -11,6 +11,12 @@ nhất client giữ 1 connection lâu dài (không phải request/response ngắ
 
 Go. Không có DB quan hệ — toàn bộ state (connection registry, presence) nằm ở Redis.
 
+## API docs
+
+Service này gần như thuần WebSocket, không phải REST — nguyên tắc #9 CLAUDE.md root (mọi
+service phải có Swagger) áp dụng CHỈ nếu sau này có thêm REST endpoint thật (không tính WS
+handshake). Nếu có, dùng `swaggo/swag` + `gofiber/swagger` như các service Go khác.
+
 ## Giao tiếp
 
 - **Verify access_token (JWT) tại chỗ khi WS handshake** — verify chữ ký RS256 bằng public key

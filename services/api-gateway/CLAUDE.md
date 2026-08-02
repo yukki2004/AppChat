@@ -12,6 +12,12 @@ Realtime Gateway). Không có business logic — chỉ routing, auth, rate limit
 Go (Fiber framework). Stateless — không có DB riêng, chỉ dùng Redis cho cache session verify
 và rate-limit counter.
 
+## API docs
+
+Chưa bật Swagger — thuần proxy/route table, chưa có logic request/response riêng cần document
+(xem nguyên tắc #9 CLAUDE.md root). Khi thêm logic thật sự (không chỉ forward nguyên xi), dùng
+`swaggo/swag` + `gofiber/swagger`.
+
 ## Giao tiếp
 
 - **Verify access_token (JWT) tại chỗ** — KHÔNG gọi gRPC mỗi request. Verify chữ ký RS256 bằng

@@ -11,6 +11,11 @@ messaging hay call — chỉ upload và trả CDN URL.
 
 Go (Fiber). Cloudflare R2 (S3-compatible) + CDN. MongoDB cho tracking upload.
 
+## API docs
+
+Bắt buộc có Swagger khi thêm endpoint REST thật đầu tiên (xem nguyên tắc #9 CLAUDE.md root) —
+dùng `swaggo/swag` + `gofiber/swagger`, annotation comment phía trên handler rồi `swag init`.
+
 ## Giao tiếp
 
 - **RabbitMQ publish** (`media.exchange`): `media.upload_completed`, `media.processing_done`,

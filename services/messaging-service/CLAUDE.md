@@ -13,6 +13,12 @@ reply, poll/vote, tin nhắn tạm thời.
 Java 25 / Spring Boot 4. MongoDB (`messages`, `conversations`) + PostgreSQL cho phần liên quan
 tới metadata do Group cũ quản lý trước đây (nay đã gộp vào Core, Messaging chỉ gRPC sang lấy).
 
+## API docs
+
+Bắt buộc có Swagger khi thêm endpoint REST thật đầu tiên (xem nguyên tắc #9 CLAUDE.md root) —
+dùng `springdoc-openapi-starter-webmvc-ui` giống core-service, chỉ cần thêm dependency vào
+`pom.xml`, không cần config thêm.
+
 ## Giao tiếp
 
 - **gRPC gọi ra**: `core-service.CheckFriendship` / `CheckBlock` (chat 1-1),

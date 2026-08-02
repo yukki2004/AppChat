@@ -54,6 +54,21 @@ WebSocket (push realtime tới client).
    ràng (VD: R2 file sau retention period).
 8. **Không service nào tự ý gọi thẳng API bên thứ 3 thay cho service phụ trách** — VD: chỉ
    `media-service` được gọi Cloudflare R2 API, chỉ `call-service` được gọi LiveKit/Agora API.
+9. **Mọi service PHẢI expose Swagger/OpenAPI UI cho các REST endpoint của nó**, tự sinh từ
+   code (annotation/comment), không viết tay file YAML riêng rồi để lệch code. Thư viện theo
+   đúng stack — không tự chọn thư viện khác:
+   - Java (core-service, messaging-service, social-service): `springdoc-openapi-starter-webmvc-ui`
+     — chỉ cần thêm dependency, UI tự có ở `/swagger-ui/index.html`, JSON ở `/v3/api-docs`,
+     không cần config thêm gì. Đã bật ở core-service.
+   - Go (api-gateway, realtime-gateway, media-service): `swaggo/swag` + `gofiber/swagger` — cần
+     annotation dạng comment `// @Summary...` phía trên handler rồi chạy `swag init` để sinh
+     `docs/`. api-gateway thuần proxy/route table nên có thể hoãn tới khi có logic request/
+     response thật sự cần document (không phải chỉ forward nguyên xi).
+   - .NET (call-service, notification-service): `Swashbuckle.AspNetCore` — thêm
+     `builder.Services.AddSwaggerGen()` + `app.UseSwaggerUI()` trong `Program.cs`.
+   Áp dụng khi service đó có endpoint REST thật đầu tiên (khác `/health`) — không bắt buộc phải
+   setup Swagger sớm cho service mới chỉ có skeleton, nhưng PHẢI thêm cùng lúc với endpoint thật
+   đầu tiên, không để dồn lại "làm sau".
 
 ## Cấu trúc repo
 

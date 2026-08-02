@@ -12,6 +12,12 @@ notification/mark-read.
 
 .NET 8 / ASP.NET Core. PostgreSQL. Redis cho badge count.
 
+## API docs
+
+Bắt buộc có Swagger khi thêm endpoint REST thật đầu tiên (đọc danh sách/mark-read — xem nguyên
+tắc #9 CLAUDE.md root) — dùng `Swashbuckle.AspNetCore`: `AddSwaggerGen()` + `UseSwaggerUI()`
+trong `Program.cs`.
+
 ## Giao tiếp
 
 - **gRPC expose**: `SendVoIPPush` — gọi bởi Call Service, dùng gRPC (không phải RabbitMQ) vì

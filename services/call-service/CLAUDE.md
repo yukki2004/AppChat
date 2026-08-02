@@ -12,6 +12,11 @@ bộ phần WebRTC thật sự (signaling, SFU, TURN, simulcast).
 
 .NET 8 / ASP.NET Core. PostgreSQL. Redis cho call session state.
 
+## API docs
+
+Bắt buộc có Swagger khi thêm endpoint REST thật đầu tiên (xem nguyên tắc #9 CLAUDE.md root) —
+dùng `Swashbuckle.AspNetCore`: `AddSwaggerGen()` + `UseSwaggerUI()` trong `Program.cs`.
+
 ## Giao tiếp
 
 - **gRPC gọi ra**: `notification-service.SendVoIPPush` — dùng gRPC vì cần độ trễ thấp cho

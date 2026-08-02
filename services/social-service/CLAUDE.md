@@ -11,6 +11,12 @@ Story, post, react, comment, feed, tag — phần "mạng xã hội" tách biệ
 Java 25 / Spring Boot 4. PostgreSQL (post, comment, reaction) + MongoDB (story view, feed
 cache).
 
+## API docs
+
+Bắt buộc có Swagger khi thêm endpoint REST thật đầu tiên (xem nguyên tắc #9 CLAUDE.md root) —
+dùng `springdoc-openapi-starter-webmvc-ui` giống core-service, chỉ cần thêm dependency vào
+`pom.xml`, không cần config thêm.
+
 ## Giao tiếp
 
 - **gRPC gọi ra**: `core-service.CheckFriendship` / `CheckBlock` — lọc nội dung theo quan hệ

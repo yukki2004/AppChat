@@ -13,6 +13,13 @@ kiện/lịch hẹn nhóm).
 
 Java 25 / Spring Boot 4. PostgreSQL. Redis cho session/OTP/rate-limit login.
 
+## API docs
+
+`springdoc-openapi-starter-webmvc-ui` đã bật (xem nguyên tắc #9 CLAUDE.md root) — UI ở
+`/swagger-ui/index.html`, JSON ở `/v3/api-docs`, tự sinh từ `@RestController`/DTO hiện có,
+không cần config thêm. Thêm controller/DTO mới thì Swagger tự cập nhật theo, không phải khai
+báo tay ở đâu khác.
+
 ## Giao tiếp
 
 - **gRPC expose** (service khác gọi vào): `RefreshAccessToken`, `GetUserPublicInfo`,

@@ -1,6 +1,7 @@
-// Package config nạp cấu hình 4 tầng: config/base.yaml (default chung) bị đè bởi
-// config/{APP_ENV}.yaml (dev/stg/prod), sau cùng biến môi trường (prefix APP_) đè lên tất cả —
-// dùng cho giá trị nhạy cảm (password, connection string) không nằm trong file yaml.
+// Package config loads a 4-layer configuration: config/base.yaml (shared defaults) overridden
+// by config/{APP_ENV}.yaml (dev/stg/prod), and finally environment variables (APP_ prefix)
+// override everything — for sensitive values (passwords, connection strings) that don't belong
+// in a yaml file.
 package config
 
 import (
@@ -12,9 +13,14 @@ import (
 )
 
 type Config struct {
-	Env      string
-	Port     string `mapstructure:"port"`
-	LogLevel string `mapstructure:"log_level"`
+	Env            string
+	Port           string `mapstructure:"port"`
+	LogLevel       string `mapstructure:"log_level"`
+	CoreServiceURL string `mapstructure:"core_service_url"`
+	RedisHost      string `mapstructure:"redis_host"`
+	RedisPort      string `mapstructure:"redis_port"`
+	RedisPassword  string `mapstructure:"redis_password"`
+	CookieDomain   string `mapstructure:"cookie_domain"`
 }
 
 func Load() (*Config, error) {

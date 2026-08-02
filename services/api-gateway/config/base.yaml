@@ -1,2 +1,7 @@
 port: "8080"
 log_level: "info"
+core_service_url: "http://localhost:8090"
+redis_host: "localhost"
+redis_port: "6379"
+redis_password: ""
+cookie_domain: ""

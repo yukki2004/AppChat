@@ -33,9 +33,11 @@ import com.chatapp.core.base.repository.UserRepository;
 import com.chatapp.core.base.repository.UserSessionRepository;
 import com.chatapp.core.exception.DuplicateUserException;
 import com.chatapp.core.exception.InvalidCredentialsException;
+import com.chatapp.core.exception.SessionNotFoundException;
 import com.chatapp.core.exception.TwoFactorMethodNotEnabledException;
 import com.chatapp.core.geoip.GeoIpService;
 import com.chatapp.core.geoip.GeoLookupResult;
+import com.chatapp.core.security.JwtRevocationService;
 import com.chatapp.core.security.JwtTokenProvider;
 import com.chatapp.core.twofactor.backupcode.TwoFactorBackupCodeService;
 import com.chatapp.core.twofactor.strategy.TwoFactorChallengeDispatcher;
@@ -63,6 +65,7 @@ public class AuthServiceImpl implements AuthService {
     private final PreAuthTokenService preAuthTokenService;
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider jwtTokenProvider;
+    private final JwtRevocationService jwtRevocationService;
     private final GeoIpService geoIpService;
     private final LoginAuditLogService loginAuditLogService;
 
@@ -187,6 +190,86 @@ public class AuthServiceImpl implements AuthService {
 
         preAuthTokenService.delete(preAuthToken);
         return issueTokens(user, ipAddress, userAgent);
+    }
+
+    @Override
+    @Transactional
+    public void logout(String refreshToken, String accessToken, String ipAddress, String userAgent) {
+        UserSessionEntity session = null;
+        if (refreshToken != null && !refreshToken.isBlank()) {
+            session = userSessionRepository.findByTokenHashAndIsActiveTrueAndExpiresAtAfter(
+                    sha256Hex(refreshToken), Instant.now()).orElse(null);
+            if (session != null) {
+                session.revoke("USER_LOGOUT");
+            }
+        }
+
+        JwtTokenProvider.AccessTokenClaims claims = null;
+        if (accessToken != null && !accessToken.isBlank()) {
+            claims = jwtTokenProvider.parseAndVerify(accessToken).orElse(null);
+            if (claims != null) {
+                jwtRevocationService.blacklist(claims.jti(), claims.expiresAt());
+            }
+        }
+
+        UUID userId = session != null ? session.getUserId() : (claims != null ? claims.userId() : null);
+        if (userId != null) {
+            loginAuditLogService.record(userId, LoginAuditEventType.LOGOUT, ipAddress, userAgent,
+                    session != null ? session.getDeviceId() : null,
+                    session != null ? session.getId() : null, null);
+        }
+        // Both cookies missing/already invalid -> nothing to revoke, nothing meaningful to
+        // attribute an audit row to; logout stays a no-op success either way (idempotent).
+    }
+
+    @Override
+    @Transactional
+    public void logoutSession(UUID userId, UUID sessionId, String ipAddress, String userAgent) {
+        UserSessionEntity session = userSessionRepository
+                .findByIdAndUserIdAndIsActiveTrueAndExpiresAtAfter(sessionId, userId, Instant.now())
+                .orElseThrow(() -> new SessionNotFoundException("Session not found or already revoked"));
+        session.revoke("USER_REVOKED_REMOTE");
+        // No jti is known for this device's access_token (only its refresh_token hash is
+        // stored) so it can't be blacklisted here — it dies on its own within its remaining
+        // TTL (<=15 min) once this refresh_token can no longer mint a new one.
+
+        loginAuditLogService.record(userId, LoginAuditEventType.SESSION_REVOKE, ipAddress, userAgent,
+                session.getDeviceId(), session.getId(), null);
+    }
+
+    @Override
+    @Transactional
+    public void logoutAll(UUID userId, String currentRefreshToken, boolean keepCurrent, String ipAddress, String userAgent) {
+        Instant now = Instant.now();
+        UUID excludedSessionId = null;
+        if (keepCurrent && currentRefreshToken != null && !currentRefreshToken.isBlank()) {
+            excludedSessionId = userSessionRepository
+                    .findByTokenHashAndIsActiveTrueAndExpiresAtAfter(sha256Hex(currentRefreshToken), now)
+                    .map(UserSessionEntity::getId)
+                    .orElse(null);
+        }
+
+        for (UserSessionEntity session : userSessionRepository.findAllByUserIdAndIsActiveTrueAndExpiresAtAfter(userId, now)) {
+            if (session.getId().equals(excludedSessionId)) {
+                continue;
+            }
+            session.revoke("USER_LOGOUT_ALL");
+            loginAuditLogService.record(userId, LoginAuditEventType.SESSION_REVOKE, ipAddress, userAgent,
+                    session.getDeviceId(), session.getId(), null);
+        }
+
+        if (!keepCurrent) {
+            // Blacklists every access_token already issued to this user at once (unlike
+            // logoutSession, this doesn't need to know individual jti values) — see E.6.
+            jwtRevocationService.revokeAllForUser(userId, jwtTokenProvider.getAccessTokenTtlSeconds());
+        }
+
+        // TODO(outbox-pattern): publish `user.logged_out_all` on `user.exchange`
+        // (RoutingKeys.UserExchange.USER_LOGGED_OUT_ALL) once the outbox table + relay worker
+        // exist (skills/outbox-pattern.md) — no direct RabbitMQ publish here in the meantime.
+        // WS Gateway subscribes to this to force-disconnect this user's live sockets; without
+        // it, an already-open WS connection keeps working until it happens to reconnect (see
+        // docs/.../05-cookie-auth-flow.md E.8).
     }
 
     private AuthResult issueTokens(UserEntity user, String ipAddress, String userAgent) {

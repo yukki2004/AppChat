@@ -24,7 +24,7 @@ revoke ngay khi logout/block, và bù lại độ trễ revoke của access toke
 | **HttpOnly** | true | true | true |
 | **Secure** | true | true | true |
 | **SameSite** | Strict | Strict | Strict |
-| **Path** | `/` | `/auth/refresh` (chỉ gửi lên đúng endpoint refresh, giảm bề mặt lộ token) | `/auth/login/2fa` (match cả `/auth/login/2fa` và `/auth/login/2fa/challenge` — cookie path match theo prefix, RFC 6265) |
+| **Path** | `/` | `/auth` (không phải `/auth/refresh` — cookie path match theo TIỀN TỐ, RFC 6265, và `/auth/refresh` KHÔNG phải tiền tố của `/auth/logout`/`/auth/logout-all` nên browser sẽ không gửi cookie lên 2 endpoint đó nếu để path hẹp vậy; `/auth` là tiền tố hẹp nhất bao được cả `/auth/refresh`, `/auth/logout`, `/auth/logout-all`) | `/auth/login/2fa` (match cả `/auth/login/2fa` và `/auth/login/2fa/challenge` — cookie path match theo prefix, RFC 6265) |
 | **Domain** | `.chatapp.com` | `.chatapp.com` | `.chatapp.com` |
 | **Max-Age** | 900 (15 phút) | 2592000 (30 ngày) | 300 (5 phút, khớp TTL Redis) |
 | **Giá trị** | JWT (`header.payload.signature`) | UUID v4 ngẫu nhiên | UUID v4 ngẫu nhiên |
@@ -63,7 +63,7 @@ POST /auth/login  { email, password }
 
 ← HTTP 200
   Set-Cookie: access_token=<jwt>; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=900
-  Set-Cookie: refresh_token=<uuid>; HttpOnly; Secure; SameSite=Strict; Path=/auth/refresh; Max-Age=2592000
+  Set-Cookie: refresh_token=<uuid>; HttpOnly; Secure; SameSite=Strict; Path=/auth; Max-Age=2592000
 ```
 
 **Trường hợp CÓ bật 2FA — xem đầy đủ ở E.9. Ở bước này TUYỆT ĐỐI KHÔNG phát access_token/
@@ -99,7 +99,7 @@ phức tạp):
 Request bất kỳ → 401 { error_code: "TOKEN_EXPIRED" }
 
 → Client gọi: POST /auth/refresh
-  Cookie: refresh_token=<uuid>   ← browser tự đính kèm (Path=/auth/refresh)
+  Cookie: refresh_token=<uuid>   ← browser tự đính kèm (Path=/auth)
 
 → API Gateway forward thẳng (không verify access_token) sang Core Service
 → Core Service: gRPC nội bộ RefreshAccessToken(refresh_token)
@@ -136,13 +136,55 @@ không cần job cleanup riêng.
 
 ## **E.7 Đăng xuất – Clear Cookie**
 
+3 biến thể, cùng cơ chế revoke ở E.6 nhưng khác phạm vi:
+
+**Đăng xuất thiết bị hiện tại:**
+
 ```
 POST /auth/logout
 → Core Service: revoke refresh_token hiện tại (revoked_at) + blacklist jti access_token hiện tại
+  (đọc jti trực tiếp từ access_token cookie của chính request này — biết chính xác, blacklist
+  tức thời)
 ← HTTP 200
-  Set-Cookie: access_token=; Max-Age=0
-  Set-Cookie: refresh_token=; Max-Age=0
+  Set-Cookie: access_token=; Path=/; Max-Age=0
+  Set-Cookie: refresh_token=; Path=/auth; Max-Age=0
 ```
+
+**Đăng xuất 1 thiết bị khác (màn quản lý thiết bị đăng nhập):**
+
+```
+DELETE /auth/sessions/{sessionId}
+  Cookie: access_token=<jwt>   ← của THIẾT BỊ HIỆN TẠI, chỉ để xác thực danh tính người gọi
+
+→ Core Service: check sessionId thuộc đúng user gọi, revoke refresh_token của session đó
+← HTTP 200 (không Set-Cookie gì — không đụng tới cookie của thiết bị đang gọi request này)
+```
+
+Không blacklist được `jti` của thiết bị bị đăng xuất — Core Service chỉ lưu `token_hash` của
+`refresh_token` trong `user_sessions`, không lưu `jti` theo từng thiết bị (tránh phải ghi DB mỗi
+lần refresh chỉ để phục vụ đúng 1 tình huống hiếm này). Nên access_token của thiết bị đó vẫn còn
+hiệu lực tới tối đa 15 phút — chấp nhận được vì refresh_token đã revoke nên sau đó chắc chắn
+không refresh lại được nữa.
+
+**Đăng xuất tất cả thiết bị:**
+
+```
+POST /auth/logout-all?keep_current=false   (mặc định false)
+
+→ Core Service: revoke TẤT CẢ refresh_token của user
+→ keep_current=false: set thêm cache:jwt_revoked_before:{user_id} (E.6) → chặn NGAY mọi
+  access_token đang lưu hành, kể cả thiết bị đang gọi request này
+→ keep_current=true: refresh_token của thiết bị hiện tại KHÔNG bị revoke, access_token hiện tại
+  giữ nguyên hiệu lực — các thiết bị khác rơi vào tình huống như DELETE /auth/sessions/{id} ở
+  trên (không blacklist tức thời, chờ hết hạn tự nhiên ≤15 phút)
+← HTTP 200
+  keep_current=false: Set-Cookie access_token=;Path=/;Max-Age=0 + refresh_token=;Path=/auth;Max-Age=0
+  keep_current=true: không Set-Cookie gì (thiết bị hiện tại vẫn đăng nhập)
+```
+
+WS Gateway cần được báo để force-disconnect socket đang mở khi `logout-all` — xem E.8
+(`user.logged_out_all`). **Hiện CHƯA publish thật** vì outbox pattern (bảng `outbox_events` +
+relay worker) chưa được wire ở Core Service — đã để `TODO` tại call site, chờ hạ tầng outbox.
 
 ## **E.8 WebSocket — khác biệt so với REST**
 

@@ -29,7 +29,10 @@ báo tay ở đâu khác.
   `docs/.../05-cookie-auth-flow.md`). Core Service giữ private key RS256, KHÔNG service nào
   khác được phát hành access token.
 - **RabbitMQ publish**: `user.exchange` — `user.registered`, `user.profile_updated`,
-  `user.blocked`, `user.new_device_login`, `friend.request_sent`, `friend.accepted`,
+  `user.blocked`, `user.new_device_login`, `user.logged_out_all` (WS Gateway subscribe để
+  force-disconnect socket đang mở khi logout-all — xem `docs/.../05-cookie-auth-flow.md` E.8;
+  **chưa publish thật, TODO chờ outbox pattern — xem `skills/outbox-pattern.md`**),
+  `friend.request_sent`, `friend.accepted`,
   `friend.removed`, `user.block_set`, `user.block_removed` · `group.exchange` — `group.member_joined`, `group.member_removed`,
   `group.role_changed`, `group.join_request`, `group.deleted`, `group.event_created`,
   `group.event_reminder`.

@@ -28,6 +28,23 @@ public final class RedisKeys {
         return "cache:otp_lockout:" + purpose.name() + ":" + target;
     }
 
+    /** Set by single-device logout to blacklist exactly the access_token in use for that
+     *  request — Gateway checks this per request (05-cookie-auth-flow.md E.4/E.6). TTL = time
+     *  remaining until that token's own `exp`, set at the call site (JwtRevocationService),
+     *  never the fixed access-token TTL — a token nearing expiry doesn't need a fresh 15 min. */
+    public static String jwtBlacklist(String jti) {
+        return "cache:jwt_blacklist:" + jti;
+    }
+
+    /** Set by logout-all/admin-block to invalidate every access_token already issued to this
+     *  user at once — Gateway rejects any JWT whose `iat` is <= this value. TTL = the
+     *  access-token TTL (JwtProperties.accessTokenTtlSeconds), set at the call site: past that
+     *  point every pre-existing JWT has expired on its own anyway, so the key can safely
+     *  disappear. See 05-cookie-auth-flow.md E.6. */
+    public static String jwtRevokedBefore(UUID userId) {
+        return "cache:jwt_revoked_before:" + userId;
+    }
+
     private RedisKeys() {
     }
 }

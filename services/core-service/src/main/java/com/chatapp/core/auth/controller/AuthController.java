@@ -1,13 +1,18 @@
 package com.chatapp.core.auth.controller;
 
+import java.util.UUID;
+
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CookieValue;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.chatapp.core.auth.AuthService;
@@ -29,7 +34,8 @@ import lombok.RequiredArgsConstructor;
 
 /**
  * Register/login flow (email/phone + password, no OAuth2 yet) plus the 2-step 2FA
- * challenge/submit flow. Cookies: access_token Path=/, refresh_token Path=/auth/refresh,
+ * challenge/submit flow. Cookies: access_token Path=/, refresh_token Path=/auth (covers
+ * /auth/refresh, /auth/logout, /auth/logout-all — see REFRESH_COOKIE_PATH),
  * pre_auth_token Path=/auth/login/2fa — all HttpOnly+Secure+SameSite=Strict, same mechanism,
  * never a token in the response body. Response body is always wrapped in {@link ApiResponse}.
  */
@@ -39,6 +45,13 @@ public class AuthController {
 
     private static final String PRE_AUTH_COOKIE_NAME = "pre_auth_token";
     private static final String PRE_AUTH_COOKIE_PATH = "/auth/login/2fa";
+
+    /** NOT "/auth/refresh" — RFC 6265 path matching is prefix-based, and "/auth/refresh" is not
+     *  a prefix of "/auth/logout"/"/auth/logout-all", so the browser would silently never send
+     *  this cookie to those endpoints. "/auth" is the narrowest prefix that covers refresh,
+     *  logout, and logout-all all at once while still being HttpOnly and never reaching
+     *  non-auth endpoints. */
+    private static final String REFRESH_COOKIE_PATH = "/auth";
 
     private final AuthService authService;
 
@@ -99,6 +112,48 @@ public class AuthController {
                 .body(ApiResponse.ok(result.user()));
     }
 
+    @PostMapping("/auth/logout")
+    public ResponseEntity<ApiResponse<Void>> logout(
+            @CookieValue(name = "refresh_token", required = false) String refreshToken,
+            @CookieValue(name = "access_token", required = false) String accessToken,
+            @RequestHeader(value = "User-Agent", required = false) String userAgent,
+            @RequestHeader(value = "X-Client-IP", required = false) String clientIp) {
+        authService.logout(refreshToken, accessToken, clientIp, userAgent);
+        return ResponseEntity.ok()
+                .header(HttpHeaders.SET_COOKIE, buildCookie("access_token", "", "/", 0).toString())
+                .header(HttpHeaders.SET_COOKIE, buildCookie("refresh_token", "", REFRESH_COOKIE_PATH, 0).toString())
+                .body(ApiResponse.ok());
+    }
+
+    /** Logs out 1 OTHER device — see AuthService#logoutSession for why its access_token can't
+     *  be blacklisted immediately here. */
+    @DeleteMapping("/auth/sessions/{sessionId}")
+    public ResponseEntity<ApiResponse<Void>> logoutSession(
+            @RequestHeader("X-User-Id") UUID userId,
+            @PathVariable UUID sessionId,
+            @RequestHeader(value = "User-Agent", required = false) String userAgent,
+            @RequestHeader(value = "X-Client-IP", required = false) String clientIp) {
+        authService.logoutSession(userId, sessionId, clientIp, userAgent);
+        return ResponseEntity.ok(ApiResponse.ok());
+    }
+
+    @PostMapping("/auth/logout-all")
+    public ResponseEntity<ApiResponse<Void>> logoutAll(
+            @RequestHeader("X-User-Id") UUID userId,
+            @RequestParam(name = "keep_current", defaultValue = "false") boolean keepCurrent,
+            @CookieValue(name = "refresh_token", required = false) String refreshToken,
+            @RequestHeader(value = "User-Agent", required = false) String userAgent,
+            @RequestHeader(value = "X-Client-IP", required = false) String clientIp) {
+        authService.logoutAll(userId, refreshToken, keepCurrent, clientIp, userAgent);
+        if (keepCurrent) {
+            return ResponseEntity.ok(ApiResponse.ok());
+        }
+        return ResponseEntity.ok()
+                .header(HttpHeaders.SET_COOKIE, buildCookie("access_token", "", "/", 0).toString())
+                .header(HttpHeaders.SET_COOKIE, buildCookie("refresh_token", "", REFRESH_COOKIE_PATH, 0).toString())
+                .body(ApiResponse.ok());
+    }
+
     private void requirePreAuthToken(String preAuthToken) {
         if (preAuthToken == null || preAuthToken.isBlank()) {
             throw new InvalidCredentialsException("Missing pre_auth_token");
@@ -107,7 +162,7 @@ public class AuthController {
 
     private String[] buildAccessRefreshCookies(AuthResult result) {
         ResponseCookie accessCookie = buildCookie("access_token", result.accessToken(), "/", result.accessTokenTtlSeconds());
-        ResponseCookie refreshCookie = buildCookie("refresh_token", result.refreshToken(), "/auth/refresh", result.refreshTokenTtlSeconds());
+        ResponseCookie refreshCookie = buildCookie("refresh_token", result.refreshToken(), REFRESH_COOKIE_PATH, result.refreshTokenTtlSeconds());
         return new String[] {accessCookie.toString(), refreshCookie.toString()};
     }
 

@@ -78,6 +78,47 @@
 </section>
 
 <section>
+  <h2>5. Logout (current device)</h2>
+  <p>Revokes this device's refresh_token + blacklists this exact access_token's <code>jti</code>
+  (immediate, precise revoke). Clears both cookies.</p>
+  <button onclick="logout()">Logout</button>
+</section>
+
+<section>
+  <h2>6. Logout 1 other device</h2>
+  <p>No "list sessions" endpoint exists yet, so find the id manually via SQL:
+  <code>SELECT id, device_name, ip_address, created_at FROM user_sessions WHERE user_id = '&lt;uuid&gt;' AND is_active = true;</code>
+  To actually have a 2nd active session to test against, log in from a separate incognito
+  window/browser first (this page reuses 1 cookie jar, so logging in again here just rotates
+  the same session).</p>
+  <div class="row">
+    <input id="logout-session-id" placeholder="session id (UUID) — an OTHER device's session" />
+    <button onclick="logoutSession()">Logout this session</button>
+  </div>
+  <p>Note: that device's refresh_token is revoked immediately, but its access_token is NOT
+  blacklisted (Core Service doesn't track per-session <code>jti</code>) — it keeps working for
+  up to 15 more minutes until it expires naturally. Expected, not a bug — see AuthService#logoutSession.</p>
+</section>
+
+<section>
+  <h2>7. Logout all devices</h2>
+  <label><input type="checkbox" id="logout-all-keep-current" /> keep current device logged in (logout-others)</label>
+  <button onclick="logoutAll()">Logout all</button>
+  <p>Unchecked = revokes every session including this one (<code>cache:jwt_revoked_before</code>
+  set, blocks every access_token instantly, clears cookies here too). Checked = every OTHER
+  session is revoked, this device's access_token stays valid untouched.</p>
+</section>
+
+<section>
+  <h2>8. Check auth status (probe)</h2>
+  <p>No dedicated "whoami" endpoint yet — this calls <code>POST /2fa/totp/setup</code> purely as
+  a cheap authenticated probe (harmless side effect: only writes a pending secret to Redis, not
+  the DB). <b>200</b> = this device is still authenticated. <b>401 TOKEN_EXPIRED/TOKEN_REVOKED</b>
+  = logged out — use this right after sections 5/6/7 to confirm the logout actually took effect.</p>
+  <button onclick="checkAuth()">Check auth status</button>
+</section>
+
+<section>
   <h2>Response log</h2>
   <pre id="log">(nothing yet)</pre>
 </section>
@@ -167,6 +208,23 @@ function challenge() {
 
 function submitTwoFactor() {
   return call('POST', '/auth/login/2fa', { code: val('submit-code') });
+}
+
+function logout() {
+  return call('POST', '/auth/logout', null);
+}
+
+function logoutSession() {
+  return call('DELETE', '/auth/sessions/' + val('logout-session-id'), null);
+}
+
+function logoutAll() {
+  const keepCurrent = document.getElementById('logout-all-keep-current').checked;
+  return call('POST', '/auth/logout-all?keep_current=' + keepCurrent, null);
+}
+
+function checkAuth() {
+  return call('POST', '/2fa/totp/setup', null);
 }
 
 function val(id) {

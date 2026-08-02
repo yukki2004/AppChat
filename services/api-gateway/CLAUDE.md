@@ -42,9 +42,13 @@ termination · circuit breaker per-downstream · response compression · health 
 `/health/live`, `/health/ready`).
 
 **Đã code**: reverse proxy (`internal/proxy`), verify JWT + check revoke (`internal/middleware`
-`CookieAuth`), `X-Client-IP` injection, request ID, CORS, health check. Route table hiện chỉ có
-các route của Core Service auth/2FA đã có (`cmd/main.go`) — thêm route mới cho service khác thì
-thêm vào route table đó theo đúng phân loại public/protected.
+`CookieAuth`), `X-Client-IP` injection, request ID, CORS, health check. Route table hiện có các
+route auth/2FA/logout của Core Service (`cmd/main.go`) — thêm route mới cho service khác thì
+thêm vào route table đó theo đúng phân loại public/protected. Lưu ý `/auth/logout` cố tình để
+PUBLIC (không qua `authRequired`) dù về bản chất là thao tác trên session đã đăng nhập — vì nó
+tự đọc `refresh_token` cookie để xác định danh tính (xem E.7) và phải chạy được kể cả khi
+`access_token` đã hết hạn; `/auth/logout-all` và `DELETE /auth/sessions/:sessionId` thì PROTECTED
+bình thường vì cần `X-User-Id` đã verify để check ownership.
 
 **Chưa code** (biết trước, không phải quên): rate limiting, circuit breaker, timeout cứng 30s,
 SSL termination, response compression, `/auth/refresh` (chưa có gRPC `RefreshAccessToken` phía

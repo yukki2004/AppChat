@@ -36,6 +36,12 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.fail("METHOD_ALREADY_ENABLED", ex.getMessage()));
     }
 
+    @ExceptionHandler(SessionNotFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleSessionNotFound(SessionNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(ApiResponse.fail("SESSION_NOT_FOUND", ex.getMessage()));
+    }
+
     @ExceptionHandler(OtpLockedException.class)
     public ResponseEntity<ApiResponse<Void>> handleOtpLocked(OtpLockedException ex) {
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)

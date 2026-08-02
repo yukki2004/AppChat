@@ -60,6 +60,10 @@ func main() {
 	app.Post("/auth/login", forward)
 	app.Post("/auth/login/2fa/challenge", forward)
 	app.Post("/auth/login/2fa", forward)
+	// Also public: /auth/logout works off the refresh_token cookie alone (see E.7) and must
+	// still succeed when access_token is already expired/missing — logging out shouldn't
+	// require a currently-valid access token.
+	app.Post("/auth/logout", forward)
 
 	// Protected — requires a verified access_token, forwarded downstream as X-User-Id.
 	app.Post("/2fa/totp/setup", authRequired, forward)
@@ -67,6 +71,8 @@ func main() {
 	app.Post("/2fa/email/setup", authRequired, forward)
 	app.Post("/2fa/email/confirm", authRequired, forward)
 	app.Delete("/2fa/:method", authRequired, forward)
+	app.Delete("/auth/sessions/:sessionId", authRequired, forward)
+	app.Post("/auth/logout-all", authRequired, forward)
 
 	log.Printf("api-gateway starting on :%s (env=%s, core_service=%s)", cfg.Port, cfg.Env, cfg.CoreServiceURL)
 	if err := app.Listen(":" + cfg.Port); err != nil {

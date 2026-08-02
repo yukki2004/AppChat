@@ -14,6 +14,7 @@ public final class RoutingKeys {
         public static final String USER_PROFILE_UPDATED = "user.profile_updated";
         public static final String USER_BLOCKED = "user.blocked";
         public static final String USER_NEW_DEVICE_LOGIN = "user.new_device_login";
+        public static final String USER_LOGGED_OUT_ALL = "user.logged_out_all";
         public static final String USER_BLOCK_SET = "user.block_set";
         public static final String USER_BLOCK_REMOVED = "user.block_removed";
         public static final String FRIEND_REQUEST_SENT = "friend.request_sent";

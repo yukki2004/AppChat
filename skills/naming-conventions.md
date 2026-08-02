@@ -25,7 +25,57 @@
 - Client-generated ID (VD: `message_id` khi gửi tin nhắn) cũng là UUID v4, tạo phía client
   TRƯỚC khi gọi API, dùng để chống gửi trùng khi client retry.
 
-## 3. Cache key Redis (thống nhất toàn hệ thống)
+## 3. Enum lưu DB — số cố định gán tay, tầng ứng dụng/API luôn dùng chữ
+
+> Áp dụng khi: thêm 1 enum MỚI cần lưu vào cột DB (SQL) từ giờ trở đi. KHÔNG áp dụng hồi tố cho
+> các cột VARCHAR enum đã có sẵn trong doc/migration hiện tại (VD `two_factor_methods.method`) —
+> đó là quyết định có chủ đích, chỉ áp dụng quy tắc này cho enum mới.
+
+- **Trong DB (SQL)**: lưu số nguyên (`SMALLINT`/`INT`), KHÔNG lưu chuỗi VARCHAR tên enum.
+- **Trong code ứng dụng, request/response JSON, log**: luôn dùng TÊN chữ của enum
+  (`"LOGIN_2FA"`, không phải `2`). Client không bao giờ thấy hay gửi lên số.
+- **Số phải là code CỐ ĐỊNH gán tay cho từng giá trị, KHÔNG dùng ordinal (thứ tự khai báo)**.
+  Ordinal vỡ ngay khi thêm giá trị mới chen giữa hoặc sắp xếp lại thứ tự khai báo trong code —
+  dữ liệu cũ trong DB bị đọc sai thành giá trị khác mà không có lỗi nào báo. Code gán tay thì
+  thêm/sắp xếp lại enum trong code không ảnh hưởng gì tới data cũ.
+- Cần 1 lớp convert giữa số (DB) và enum (code) — viết 1 lần, dùng lại mọi nơi:
+
+**Java** (`@Converter` — KHÔNG dùng `@Enumerated(EnumType.ORDINAL)`):
+```java
+public enum OtpPurpose {
+    REGISTER(1), LOGIN_2FA(2), RESET_PASSWORD(3), CHANGE_EMAIL(4), ENABLE_2FA(5);
+    private final int code;
+    OtpPurpose(int code) { this.code = code; }
+    public int getCode() { return code; }
+    public static OtpPurpose fromCode(int code) {
+        for (var p : values()) if (p.code == code) return p;
+        throw new IllegalArgumentException("Unknown OtpPurpose code: " + code);
+    }
+}
+
+@Converter(autoApply = true)
+public class OtpPurposeConverter implements AttributeConverter<OtpPurpose, Integer> {
+    public Integer convertToDatabaseColumn(OtpPurpose a) { return a == null ? null : a.getCode(); }
+    public OtpPurpose convertToEntityAttribute(Integer d) { return d == null ? null : OtpPurpose.fromCode(d); }
+}
+```
+JSON vẫn serialize theo tên (`Jackson` mặc định dùng `.name()` cho enum) — không cần cấu hình gì
+thêm, converter chỉ ảnh hưởng tầng DB.
+
+**.NET**: khai báo enum với giá trị số tường minh (`enum OtpPurpose { Register = 1, Login2fa = 2 }`
+— EF Core mặc định lưu số nguyên này). Nhưng `System.Text.Json` mặc định serialize enum ra SỐ,
+khác Java — phải cấu hình `JsonStringEnumConverter` để trả JSON dạng chữ, không được bỏ qua bước
+này.
+
+**Go**: không có enum native — dùng hằng số int tường minh (không dùng `iota` một mình, vì
+`iota` cũng là ordinal trá hình) + 2 map chuyển đổi `map[int]string` / `map[string]int` giữa số
+lưu DB và chuỗi dùng ở JSON/code.
+
+**MongoDB (messaging/social/media-service)**: KHÔNG áp dụng quy tắc này — Mongo document lưu
+thẳng chuỗi enum như bình thường, không cần đổi ra số (không có concern kiểu ALTER TABLE hay
+storage engine ép kiểu như SQL).
+
+## 4. Cache key Redis (thống nhất toàn hệ thống)
 
 - Luôn bắt đầu bằng `cache:`.
 - Dạng `cache:{entity}:{id}` hoặc `cache:{entity}:{sub}:{id}`.
@@ -34,7 +84,7 @@
 - TTL luôn khai báo rõ trong code, không để mặc định vô hạn trừ khi có lý do (VD:
   `cache:presence:last_seen:{user_id}` không expire).
 
-## 4. Java (Core, Messaging, Social Service)
+## 5. Java (Core, Messaging, Social Service)
 
 | Loại | Convention | Ví dụ |
 |---|---|---|
@@ -53,7 +103,7 @@
 | Field private | camelCase | `private String sessionId;` |
 | Package | lowercase, dot-separated | `com.chatapp.messaging.service` |
 
-## 5. .NET / C# (Notification, Call Service)
+## 6. .NET / C# (Notification, Call Service)
 
 | Loại | Convention | Ví dụ |
 |---|---|---|
@@ -71,7 +121,7 @@
 | Field private | `_camelCase` | `private readonly ILogger _logger;` |
 | Namespace | PascalCase.dot.separated | `ChatApp.Notification.Application.Services` |
 
-## 6. Go (API Gateway, Realtime Gateway, Media Service)
+## 7. Go (API Gateway, Realtime Gateway, Media Service)
 
 | Loại | Convention | Ví dụ |
 |---|---|---|
@@ -87,7 +137,7 @@
 | DTO bắn ra WebSocket | PascalCase + suffix `Public` | `type PresencePublic struct {}` |
 | DTO dùng để cache (Redis) | PascalCase + suffix `Cache` | `type PresenceCache struct {}` |
 
-## 7. Database — table/collection/field
+## 8. Database — table/collection/field
 
 - Table Postgres: snake_case số nhiều — `users`, `group_members`, `group_file_folders`.
 - Collection Mongo: snake_case số nhiều — `messages`, `poll_votes`, `sticker_packs`.
@@ -96,7 +146,27 @@
 - Boolean field: tiền tố `is_`/`has_` — `is_deleted`, `is_pinned`, `has_reacted`.
 - Timestamp: hậu tố `_at` — `created_at`, `expires_at`, `reminded_at`.
 
-## 8. gRPC (proto)
+### Flyway migration file (mọi service SQL — core/notification/call)
+
+> Áp dụng khi: thêm 1 file migration mới vào `src/main/resources/db/migration/`.
+
+- Format: `V{yyyyMMddHHmmss}__{mô_tả_chức_năng}.sql` — KHÔNG dùng số thứ tự tăng dần kiểu
+  `V1`, `V2`, `V3`... Chữ `V` đứng đầu là bắt buộc do chính Flyway quy định để nhận diện file
+  migration, không bỏ được — chỉ đổi phần SỐ sau `V` từ số thứ tự sang timestamp.
+- Vì sao đổi từ số thứ tự sang timestamp: số thứ tự tăng dần (`V1`, `V2`...) dễ **đụng số**
+  khi nhiều người cùng tạo migration song song trên các branch khác nhau rồi merge (2 người
+  cùng tạo `V4` độc lập) — timestamp gần như không bao giờ trùng, không cần phối hợp nhau chọn
+  số kế tiếp.
+  Đúng: `V20260802013925__create_otp_codes_table.sql`.
+  Sai: `V4__create_otp_codes_table.sql`.
+- `{mô_tả_chức_năng}` viết theo đúng chức năng migration làm gì, snake_case, tiếng Anh (code/tên
+  file luôn tiếng Anh, chỉ doc/skill mới tiếng Việt): `create_users_table`,
+  `add_pending_email_column`, `create_otp_codes_table` — không viết chung chung kiểu `update_1`,
+  `fix_schema`.
+- Timestamp lấy tại thời điểm TẠO file migration (không phải lúc chạy migration), đủ
+  `yyyyMMddHHmmss` (14 chữ số) để đảm bảo thứ tự đúng dù 2 file tạo cùng ngày.
+
+## 9. gRPC (proto)
 
 - Package proto: `chatapp.{domain}.v1` — `chatapp.identity.v1`.
 - Service name: PascalCase + `Service` — `IdentityService`, `GroupService`.
@@ -104,7 +174,7 @@
 - Message request/response: tên method + `Request`/`Response` — `VerifySessionRequest`,
   `VerifySessionResponse`.
 
-## 9. Cloudflare R2 object key (thống nhất toàn hệ thống, chỉ Media Service ghi key này)
+## 10. Cloudflare R2 object key (thống nhất toàn hệ thống, chỉ Media Service ghi key này)
 
 > Áp dụng khi: Media Service sinh `r2_key` lúc khởi tạo upload session (mục 6.1 #1,
 > `06-media-service.md`). Đọc mục này TRƯỚC KHI đổi format `r2_key` — sai format ở đây rất khó

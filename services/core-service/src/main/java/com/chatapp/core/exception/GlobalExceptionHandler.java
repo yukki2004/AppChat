@@ -1,5 +1,7 @@
 package com.chatapp.core.exception;
 
+import com.chatapp.core.exception.common.AppException;
+import com.chatapp.core.exception.common.ErrorCode;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -40,6 +42,16 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<Void>> handleOtpLocked(OtpLockedException ex) {
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                 .body(ApiResponse.fail("OTP_LOCKED", ex.getMessage()));
+    }
+
+    /** Every friend/#19-20 error (and any future domain that adopts this pattern instead of a
+     *  dedicated exception class per case) — {@code errorCode.name()} becomes the String
+     *  {@code ApiError.code}, same format as every handler above. */
+    @ExceptionHandler(AppException.class)
+    public ResponseEntity<ApiResponse<Void>> handleAppException(AppException ex) {
+        ErrorCode errorCode = ex.getErrorCode();
+        return ResponseEntity.status(errorCode.getHttpStatusCode())
+                .body(ApiResponse.fail(errorCode.name(), errorCode.getMessage()));
     }
 
     @ExceptionHandler(UnsupportedOperationException.class)

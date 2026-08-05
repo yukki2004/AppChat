@@ -451,15 +451,35 @@ thụ 1 mã (xem cơ chế `consume` ở trên) → phát access/refresh token t
 | **id** | UUID | NO | gen_random_uuid() | PK |
 | **requester_id** | UUID FK→users | NO | – | Người gửi lời mời |
 | **addressee_id** | UUID FK→users | NO | – | Người nhận |
-| status | VARCHAR(20) | NO | PENDING | Enum FriendshipStatus |
+| status | SMALLINT | NO | 1 | Enum FriendshipStatus — lưu số cố định gán tay (`PENDING=1, ACCEPTED=2, REJECTED=3, CANCELLED=4`), KHÔNG lưu chuỗi, theo `skills/naming-conventions.md` #3 (đây là enum MỚI lưu DB, không phải trường hợp cũ được miễn áp dụng) — cùng khuôn `otp_codes.purpose`/`OtpPurposeConverter` |
 | message | VARCHAR(200) | YES | NULL | Lời nhắn kèm lời mời |
 | created_at | TIMESTAMPTZ | NO | now() | UTC |
 | updated_at | TIMESTAMPTZ | NO | now() | UTC |
 
 **Ràng buộc bắt buộc:** UNIQUE index trên cặp không phân biệt thứ tự
-`(LEAST(requester_id, addressee_id), GREATEST(requester_id, addressee_id))` — chống race
-condition khi A và B cùng lúc gửi lời mời kết bạn cho nhau, tạo ra 2 dòng PENDING song song
-(A→B và B→A) thay vì phát hiện lời mời ngược chiều đã tồn tại và tự động chuyển thành ACCEPTED.
+`(LEAST(requester_id, addressee_id), GREATEST(requester_id, addressee_id))` — chỉ tồn tại đúng 1
+row cho mỗi cặp user, bất kể ai từng là requester/addressee. Hệ quả cho tầng ứng dụng
+(`FriendServiceImpl.sendRequest`):
+- A và B cùng lúc gửi lời mời cho nhau (race condition) → 1 trong 2 insert bị unique index chặn
+  ở tầng DB (`DataIntegrityViolationException`) dù tầng code đã check "chưa có row" trước đó
+  (TOCTOU) — bắt exception này, fetch lại row, xử lý y như case dưới. Lưu ý implementation:
+  insert nhánh này PHẢI dùng `saveAndFlush()` chứ không phải `save()` — `id` là UUID sinh trong
+  bộ nhớ (Hibernate không cần round-trip DB để có ID) nên `save()` hoãn INSERT thật tới lúc
+  transaction commit, bắt exception ở `try/catch` sẽ không kích hoạt nếu không ép flush ngay.
+
+**Index bổ sung** (ngoài unique index trên): `(requester_id, addressee_id)` thường (không unique)
+— phục vụ riêng cho query `findByUnorderedPair` (chạy ở MỌI lần gửi/accept lời mời) vì query này
+lọc `OR` trực tiếp trên 2 cột đó, không dùng được unique index (index đó dùng hàm
+`LEAST`/`GREATEST`, chỉ phục vụ được check constraint lúc insert).
+- B đã gửi PENDING cho A trước, A gửi lại cho B → KHÔNG insert row mới, update ngược lại chính
+  row đó thành `ACCEPTED` (auto-accept).
+- Row cũ đang `REJECTED`/`CANCELLED` (bất kể chiều nào), 1 trong 2 người gửi lại → **reuse lại
+  chính row đó**, đổi `requester_id`/`addressee_id` theo chiều mới, đưa status về `PENDING`
+  (không insert row mới — sẽ vi phạm unique index).
+
+**Endpoint bổ sung** (không có số # riêng trong bảng 3.1 nhưng cần để #20/#21 dùng được):
+`GET /friends/requests/incoming`, `GET /friends/requests/outgoing` — liệt kê lời mời đang
+PENDING theo 2 chiều nhận/gửi.
 
 ### **ð user_blocks  [PostgreSQL]**
 

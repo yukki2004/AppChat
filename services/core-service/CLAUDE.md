@@ -57,11 +57,16 @@ DTO/Strategy thì vẫn theo domain như cũ, thêm domain mới = thêm 1 packa
 com.chatapp.core/
 ├── CoreServiceApplication.java
 ├── base/                      # hạ tầng dùng chung — KHÔNG phải 1 domain nghiệp vụ
-│   ├── entity/                 # UserEntity, UserSessionEntity, TwoFactorMethodEntity, OtpCodeEntity...
-│   ├── repository/             # UserRepository, UserSessionRepository, TwoFactorMethodRepository...
-│   ├── constant/                # TwoFactorMethod, OtpPurpose (+ OtpPurposeConverter — số cố định gán
-│   │                            # tay, xem skills/naming-conventions.md #3), RedisKeys, RoutingKeys
+│   ├── entity/                 # UserEntity, UserSessionEntity, TwoFactorMethodEntity, OtpCodeEntity,
+│   │                            # FriendshipEntity...
+│   ├── repository/             # UserRepository, UserSessionRepository, TwoFactorMethodRepository,
+│   │                            # FriendshipRepository...
+│   ├── constant/                # TwoFactorMethod, OtpPurpose, FriendshipStatus (+ converter tương ứng
+│   │                            # mỗi enum — số cố định gán tay, xem skills/naming-conventions.md #3),
+│   │                            # RedisKeys, RoutingKeys
 │   ├── config/                  # JwtProperties, OtpProperties, TotpProperties, PasswordEncoderConfig
+│   ├── UserResponse.java         # public user DTO (id/username/displayName/avatarUrl) — dùng chung
+│   │                            # cho auth/ VÀ friend/, không phải bản riêng của domain nào
 │   └── ApiResponse.java, ApiError.java   # response envelope chung cho MỌI endpoint (trừ /health)
 ├── auth/                      # register/login + luồng login-2FA (challenge/submit) — Controller/
 │   │                            # Service/DTO/PreAuthTokenService, KHÔNG có Entity/Repository riêng
@@ -73,13 +78,21 @@ com.chatapp.core/
 │   ├── TwoFactorSettingsController.java / TwoFactorSettingsService.java
 │   ├── TwoFactorChallengeDispatcher.java / TwoFactorChallengeStrategy.java (+ Totp.../Email... impl)
 │   └── OtpCodeService.java, OtpMailSender.java, TotpSecretCipher.java, TotpCodeVerifier.java
-├── profile/, friend/, block/, privacy/    # thêm sau, cùng khuôn mẫu (Controller/Service/DTO —
-│                              # Entity/Repository mới thêm vào base/, không tạo trong domain)
+├── friend/                    # gửi/chấp nhận lời mời kết bạn (#19/#20) đã có — reject/cancel/unfriend/
+│   │                            # danh sách bạn/close-friends (#21/22/23/26) CHƯA code, xem #19-26
+│   │                            # trong 03-core-service.md mục 3.1
+│   ├── FriendController.java, FriendService.java (interface) / service/FriendServiceImpl.java
+│   └── dto/request/, dto/response/
+├── profile/, block/, privacy/    # thêm sau, cùng khuôn mẫu (Controller/Service/DTO — Entity/
+│                              # Repository mới thêm vào base/, không tạo trong domain)
 ├── group/                    # domain nặng nhất — có thể lại chia sub-package member/, file/, event/
 ├── security/                  # JwtKeyManager, JwtTokenProvider, JwksController — chỉ còn đúng phần
 │                              # ký/verify JWT thật, không chứa Entity/Config (đã dời sang base/)
 ├── grpc/                      # IdentityGrpcService, GroupGrpcService (expose sau)
 └── exception/                 # GlobalExceptionHandler + custom exception
+    └── common/                 # AppException + ErrorCode — pattern cho lỗi MỚI từ giờ trở đi
+                                 # (xem mục "Lưu ý khi code" #14), auth/2FA cũ vẫn giữ nguyên
+                                 # exception riêng từng class, không hồi tố
 ```
 
 Quy tắc: domain nào cần `UserEntity`/`UserRepository` thì import từ `base/entity/`, `base/
@@ -134,6 +147,18 @@ domain, nên tách riêng khỏi `auth/` (domain `auth/` gọi vào `security/`,
     `device_id`/`device_name` mobile do client SDK gửi lên, web thì fallback parse `User-Agent`
     — không có cách server tự lấy "tên máy" thật cho web. Chi tiết đầy đủ + luồng cảnh báo
     "đăng nhập thiết bị mới": `docs/.../05-cookie-auth-flow.md` mục E.10.
+14. **Lỗi nghiệp vụ MỚI dùng `AppException(ErrorCode.XXX)`, không tự tạo class exception riêng
+    nữa** — `ErrorCode` (`exception/common/`) là enum tập trung mọi tình huống lỗi, mỗi giá trị
+    mang `code` (int, chỉ dùng nội bộ/log, KHÔNG trả ra response), `message` (tiếng Anh), và
+    `httpStatusCode`. `GlobalExceptionHandler` chỉ có đúng 1 `@ExceptionHandler(AppException.class)`
+    xử lý chung, trả `ApiError.code = errorCode.name()` (String) — giữ đúng format response cũ.
+    Exception riêng từng class kiểu cũ (`DuplicateUserException`, `InvalidCredentialsException`...)
+    ở domain `auth/`/`twofactor/` KHÔNG bị bắt buộc migrate theo — giữ nguyên, chỉ áp dụng pattern
+    mới cho domain nào code MỚI từ giờ trở đi (đã áp dụng cho `friend/`, xem #19/#20).
+    Race condition khi insert entity có `@Id @GeneratedValue` sinh UUID trong bộ nhớ (không cần
+    round-trip DB): `save()` KHÔNG insert ngay, Hibernate hoãn tới lúc flush — muốn bắt
+    `DataIntegrityViolationException` ngay tại chỗ (VD: unique index chặn race condition) PHẢI
+    dùng `saveAndFlush()`, không phải `save()`. Xem `FriendRequestResolver.insertNew()`.
 
 ## Nguyên tắc hiển thị tên/avatar (áp dụng cho service khác đọc dữ liệu từ đây)
 

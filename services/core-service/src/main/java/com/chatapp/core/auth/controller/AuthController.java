@@ -17,11 +17,11 @@ import com.chatapp.core.auth.dto.request.TwoFactorChallengeRequest;
 import com.chatapp.core.auth.dto.request.TwoFactorSubmitRequest;
 import com.chatapp.core.auth.dto.response.TwoFactorChallengeAckResponse;
 import com.chatapp.core.auth.dto.response.TwoFactorRequiredResponse;
-import com.chatapp.core.auth.dto.response.UserResponse;
 import com.chatapp.core.auth.result.AuthResult;
 import com.chatapp.core.auth.result.LoginOutcome;
 import com.chatapp.core.auth.result.TwoFactorChallengeResult;
 import com.chatapp.core.base.ApiResponse;
+import com.chatapp.core.base.UserResponse;
 import com.chatapp.core.exception.InvalidCredentialsException;
 
 import jakarta.validation.Valid;

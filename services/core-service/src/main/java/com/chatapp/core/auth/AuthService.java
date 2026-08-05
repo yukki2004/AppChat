@@ -3,9 +3,9 @@ package com.chatapp.core.auth;
 import com.chatapp.core.auth.dto.request.LoginRequest;
 import com.chatapp.core.auth.dto.request.RegisterRequest;
 import com.chatapp.core.auth.dto.response.TwoFactorChallengeAckResponse;
-import com.chatapp.core.auth.dto.response.UserResponse;
 import com.chatapp.core.auth.result.AuthResult;
 import com.chatapp.core.auth.result.LoginOutcome;
+import com.chatapp.core.base.UserResponse;
 
 public interface AuthService {
 

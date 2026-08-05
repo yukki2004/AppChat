@@ -1,4 +1,4 @@
-package com.chatapp.core.auth.dto.response;
+package com.chatapp.core.base;
 
 import java.util.UUID;
 

@@ -102,13 +102,52 @@ public class FriendServiceImpl implements FriendService {
     @Override
     @Transactional
     public void accept(UUID currentUserId, UUID otherUserId) {
-        FriendshipEntity friendship = friendshipRepository.findByUnorderedPair(currentUserId, otherUserId)
-                .filter(f -> f.getStatus() == FriendshipStatus.PENDING && f.getAddresseeId().equals(currentUserId))
+        // Only the addressee may accept, so the direction is already known here — no need for
+        // the OR-based findByUnorderedPair used where the caller's role isn't known yet (see
+        // cancelOrReject below).
+        FriendshipEntity friendship = friendshipRepository
+                .findByRequesterIdAndAddresseeIdAndStatus(otherUserId, currentUserId, FriendshipStatus.PENDING)
                 .orElseThrow(() -> new AppException(ErrorCode.FRIEND_REQUEST_NOT_FOUND));
 
         friendship.accept();
         friendshipRepository.save(friendship);
         // TODO: publish friend.accepted (RoutingKeys.UserExchange) once the outbox pattern is
+        // wired up for this service — see skills/outbox-pattern.md.
+    }
+
+    @Override
+    @Transactional
+    public void cancelOrReject(UUID currentUserId, UUID otherUserId) {
+        FriendshipEntity friendship = friendshipRepository.findByUnorderedPair(currentUserId, otherUserId)
+                .filter(f -> f.getStatus() == FriendshipStatus.PENDING)
+                .orElseThrow(() -> new AppException(ErrorCode.FRIEND_REQUEST_NOT_FOUND));
+
+        if (friendship.getRequesterId().equals(currentUserId)) {
+            friendship.cancel();
+        } else {
+            friendship.reject();
+            // Cooldown (docs/.../03-core-service.md #9b) is intentionally NOT set here — product
+            // decision, see the disabled FriendRequestRateLimiter.checkCooldown() call in
+            // sendRequest() above: rejecting someone should not block them from trying again.
+        }
+        friendshipRepository.save(friendship);
+        // No event to publish here per docs/.../02-rabbitmq-exchange-map.md — friend.request_sent
+        // covers #19, friend.accepted covers #20, friend.removed covers #22; reject/cancel isn't
+        // announced to the other side (avoids "you got rejected" awkwardness, see spec note).
+    }
+
+    @Override
+    @Transactional
+    public void unfriend(UUID currentUserId, UUID otherUserId) {
+        FriendshipEntity friendship = friendshipRepository.findByUnorderedPair(currentUserId, otherUserId)
+                .filter(f -> f.getStatus() == FriendshipStatus.ACCEPTED)
+                .orElseThrow(() -> new AppException(ErrorCode.FRIENDSHIP_NOT_FOUND));
+
+        friendshipRepository.delete(friendship);
+        // TODO: cascade-delete both directions of close_friends once that table/repository land
+        // (#26, blocked on #24/#25 per implementation plan) — unfriending must also drop any
+        // close-friend status between the 2 users.
+        // TODO: publish friend.removed (RoutingKeys.UserExchange) once the outbox pattern is
         // wired up for this service — see skills/outbox-pattern.md.
     }
 

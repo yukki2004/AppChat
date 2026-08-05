@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.UUID;
 
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -49,6 +50,22 @@ public class FriendController {
     public ResponseEntity<ApiResponse<Void>> accept(
             @RequestHeader("X-User-Id") UUID currentUserId, @PathVariable UUID userId) {
         friendService.accept(currentUserId, userId);
+        return ResponseEntity.ok(ApiResponse.ok());
+    }
+
+    /** #21 — cancel (requester) and reject (addressee) share this one endpoint; which happens
+     *  is decided by {@code currentUserId}'s role on the pending row, see {@link FriendService#cancelOrReject}. */
+    @DeleteMapping("/requests/{userId}")
+    public ResponseEntity<ApiResponse<Void>> cancelOrReject(
+            @RequestHeader("X-User-Id") UUID currentUserId, @PathVariable UUID userId) {
+        friendService.cancelOrReject(currentUserId, userId);
+        return ResponseEntity.ok(ApiResponse.ok());
+    }
+
+    @DeleteMapping("/{userId}")
+    public ResponseEntity<ApiResponse<Void>> unfriend(
+            @RequestHeader("X-User-Id") UUID currentUserId, @PathVariable UUID userId) {
+        friendService.unfriend(currentUserId, userId);
         return ResponseEntity.ok(ApiResponse.ok());
     }
 }

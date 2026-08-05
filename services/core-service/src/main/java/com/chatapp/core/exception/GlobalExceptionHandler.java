@@ -44,9 +44,6 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.fail("OTP_LOCKED", ex.getMessage()));
     }
 
-    /** Every friend/#19-20 error (and any future domain that adopts this pattern instead of a
-     *  dedicated exception class per case) — {@code errorCode.name()} becomes the String
-     *  {@code ApiError.code}, same format as every handler above. */
     @ExceptionHandler(AppException.class)
     public ResponseEntity<ApiResponse<Void>> handleAppException(AppException ex) {
         ErrorCode errorCode = ex.getErrorCode();

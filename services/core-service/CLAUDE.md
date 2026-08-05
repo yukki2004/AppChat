@@ -58,9 +58,9 @@ com.chatapp.core/
 ├── CoreServiceApplication.java
 ├── base/                      # hạ tầng dùng chung — KHÔNG phải 1 domain nghiệp vụ
 │   ├── entity/                 # UserEntity, UserSessionEntity, TwoFactorMethodEntity, OtpCodeEntity,
-│   │                            # FriendshipEntity...
+│   │                            # FriendshipEntity, UserBlockEntity, CloseFriendEntity/CloseFriendId...
 │   ├── repository/             # UserRepository, UserSessionRepository, TwoFactorMethodRepository,
-│   │                            # FriendshipRepository...
+│   │                            # FriendshipRepository, UserBlockRepository, CloseFriendRepository...
 │   ├── constant/                # TwoFactorMethod, OtpPurpose, FriendshipStatus (+ converter tương ứng
 │   │                            # mỗi enum — số cố định gán tay, xem skills/naming-conventions.md #3),
 │   │                            # RedisKeys, RoutingKeys
@@ -83,7 +83,12 @@ com.chatapp.core/
 │   │                            # trong 03-core-service.md mục 3.1
 │   ├── FriendController.java, FriendService.java (interface) / service/FriendServiceImpl.java
 │   └── dto/request/, dto/response/
-├── profile/, block/, privacy/    # thêm sau, cùng khuôn mẫu (Controller/Service/DTO — Entity/
+├── block/                     # chặn/gỡ chặn/danh sách đã chặn (#24-25) đã có — close_friends
+│   │                            # table đã tạo migration cùng batch này (cascade cần) nhưng
+│   │                            # endpoint quản lý close friends (#26) CHƯA code
+│   ├── BlockController.java, BlockService.java (interface) / service/BlockServiceImpl.java
+│   └── dto/request/
+├── profile/, privacy/            # thêm sau, cùng khuôn mẫu (Controller/Service/DTO — Entity/
 │                              # Repository mới thêm vào base/, không tạo trong domain)
 ├── group/                    # domain nặng nhất — có thể lại chia sub-package member/, file/, event/
 ├── security/                  # JwtKeyManager, JwtTokenProvider, JwksController — chỉ còn đúng phần

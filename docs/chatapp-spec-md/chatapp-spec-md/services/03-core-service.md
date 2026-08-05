@@ -481,6 +481,32 @@ lọc `OR` trực tiếp trên 2 cột đó, không dùng được unique index 
 `GET /friends/requests/incoming`, `GET /friends/requests/outgoing` — liệt kê lời mời đang
 PENDING theo 2 chiều nhận/gửi.
 
+**Block là tường chắn toàn diện** (#24): chặn ai → xoá luôn row `friendships` giữa 2 người (bất
+kể status nào) + xoá cả 2 chiều trong `close_friends`. Check block ở #19 (gửi lời mời) là OR
+2 chiều (A chặn B **hoặc** B chặn A đều chặn được), trả lỗi chung `FRIEND_REQUEST_NOT_ALLOWED`,
+không lộ ai là người chặn. Unfriend (#22) cũng cascade xoá `close_friends` 2 chiều, cùng logic.
+Cả block và unblock đều idempotent — gọi lại khi đã ở đúng trạng thái không báo lỗi, trả 200.
+Bảng `close_friends` được tạo migration ngay từ batch này (#24/#25) dù các endpoint quản lý close
+friends (#26) chưa code — vì block/unfriend cần cascade xoá vào bảng đó trước khi #26 tồn tại.
+
+**TODO — 2 loại block chưa được lên kế hoạch cụ thể (đã trao đổi, chưa chốt lịch code):** hiện
+tại `user_blocks` chỉ có đúng 1 loại "full block" (như mô tả trên: xoá friendship/close-friend,
+chặn friend request, và về sau — khi messaging/call/social-service enforce — sẽ ẩn cả nhắn tin/
+gọi/profile/tìm kiếm). Có bàn tới 1 loại thứ 2 hẹp hơn — "chặn tin nhắn/gọi" — vẫn giữ bạn bè,
+vẫn thấy profile nhau, chỉ mute nhắn tin + gọi, độc lập với full block. Nếu triển khai:
+- Thêm cột `scope SMALLINT NOT NULL DEFAULT 1` vào `user_blocks` (`FULL=1`,
+  `MESSAGE_CALL_ONLY=2`, theo `skills/naming-conventions.md` #3), không tạo bảng riêng.
+- Cascade xoá `friendships`/`close_friends` chỉ áp dụng cho scope `FULL`.
+- Check block ở #19 (chặn gửi friend request) chỉ tính scope `FULL`.
+- Core Service vẫn là nguồn sự thật duy nhất cho CẢ 2 scope (không tách data qua messaging-
+  service/call-service dù họ là bên enforce — giống lý do `CheckFriendship` đặt ở Core Service
+  từ đầu: đây là 1 quan hệ user-user, Core Service sở hữu MỌI quan hệ user-user).
+- Cần thêm gRPC `CheckBlock(actorId, targetId, action)` ở Core Service, trả `blocked: boolean`
+  theo action (`SEND_MESSAGE`/`CALL` → chặn nếu có row `FULL` HOẶC `MESSAGE_CALL_ONLY`;
+  `SEND_FRIEND_REQUEST`/`VIEW_PROFILE` → chỉ chặn nếu row là `FULL`). Messaging Service/Call
+  Service phải tự gọi gRPC này trước khi cho gửi tin/bắt đầu gọi — Core Service không chủ động
+  can thiệp vào luồng của service khác.
+
 ### **ð user_blocks  [PostgreSQL]**
 
 |  |  |  |  |  |
@@ -491,6 +517,9 @@ PENDING theo 2 chiều nhận/gửi.
 | **blocked_id** | UUID FK→users | NO | – | Người bị chặn |
 | reason | VARCHAR(100) | YES | NULL | Lý do (tuỳ chọn) |
 | created_at | TIMESTAMPTZ | NO | now() | UTC |
+
+**Endpoint bổ sung** (không có số # riêng trong bảng 3.1 nhưng cần cho UI "danh sách đã chặn"):
+`GET /blocks`.
 
 ### **ð close_friends  [PostgreSQL]**
 

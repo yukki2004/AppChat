@@ -13,7 +13,9 @@ import com.chatapp.core.base.UserResponse;
 import com.chatapp.core.base.constant.FriendshipStatus;
 import com.chatapp.core.base.entity.FriendshipEntity;
 import com.chatapp.core.base.entity.UserEntity;
+import com.chatapp.core.base.repository.CloseFriendRepository;
 import com.chatapp.core.base.repository.FriendshipRepository;
+import com.chatapp.core.base.repository.UserBlockRepository;
 import com.chatapp.core.base.repository.UserRepository;
 import com.chatapp.core.exception.common.AppException;
 import com.chatapp.core.exception.common.ErrorCode;
@@ -26,7 +28,7 @@ import com.chatapp.core.friend.util.FriendRequestResolver;
 import lombok.RequiredArgsConstructor;
 
 /**
- * Orchestrates #19/#20 — guard checks (self-action, user exists, block, rate-limit) live here;
+ * Orchestrates #19-22 — guard checks (self-action, user exists, block, rate-limit) live here;
  * the actual "what does sending a request resolve to" decision is delegated to
  * {@link FriendRequestResolver}, and Redis anti-abuse checks to {@link FriendRequestRateLimiter}
  * — kept out of this class so it doesn't grow unreadable as more friend/block features land.
@@ -37,6 +39,8 @@ public class FriendServiceImpl implements FriendService {
 
     private final UserRepository userRepository;
     private final FriendshipRepository friendshipRepository;
+    private final UserBlockRepository userBlockRepository;
+    private final CloseFriendRepository closeFriendRepository;
     private final FriendRequestRateLimiter friendRequestRateLimiter;
     private final FriendRequestResolver friendRequestResolver;
 
@@ -144,17 +148,18 @@ public class FriendServiceImpl implements FriendService {
                 .orElseThrow(() -> new AppException(ErrorCode.FRIENDSHIP_NOT_FOUND));
 
         friendshipRepository.delete(friendship);
-        // TODO: cascade-delete both directions of close_friends once that table/repository land
-        // (#26, blocked on #24/#25 per implementation plan) — unfriending must also drop any
-        // close-friend status between the 2 users.
+        closeFriendRepository.deleteById_UserIdAndId_FriendId(currentUserId, otherUserId);
+        closeFriendRepository.deleteById_UserIdAndId_FriendId(otherUserId, currentUserId);
         // TODO: publish friend.removed (RoutingKeys.UserExchange) once the outbox pattern is
         // wired up for this service — see skills/outbox-pattern.md.
     }
 
+    // TODO (not yet built, see UserBlockEntity javadoc): if user_blocks ever gets a `scope`
+    // column (FULL vs a narrower message/call-only block), this check must filter to FULL only
+    // — a message/call-only block should NOT stop a friend request.
     private boolean isBlockedEitherDirection(UUID a, UUID b) {
-        // TODO: no user_blocks table/repository yet (#24/#25 not implemented) — wire this up to
-        // UserBlockRepository.existsByBlockerIdAndBlockedId(a,b) || (b,a) once that batch lands.
-        return false;
+        return userBlockRepository.existsByBlockerIdAndBlockedId(a, b)
+                || userBlockRepository.existsByBlockerIdAndBlockedId(b, a);
     }
 
     private Map<UUID, UserEntity> loadOtherUsers(

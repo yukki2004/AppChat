@@ -25,7 +25,9 @@ import org.springframework.data.redis.core.ValueOperations;
 import com.chatapp.core.base.constant.FriendshipStatus;
 import com.chatapp.core.base.entity.FriendshipEntity;
 import com.chatapp.core.base.entity.UserEntity;
+import com.chatapp.core.base.repository.CloseFriendRepository;
 import com.chatapp.core.base.repository.FriendshipRepository;
+import com.chatapp.core.base.repository.UserBlockRepository;
 import com.chatapp.core.base.repository.UserRepository;
 import com.chatapp.core.exception.common.AppException;
 import com.chatapp.core.exception.common.ErrorCode;
@@ -41,6 +43,10 @@ class FriendServiceImplTest {
     @Mock
     private FriendshipRepository friendshipRepository;
     @Mock
+    private UserBlockRepository userBlockRepository;
+    @Mock
+    private CloseFriendRepository closeFriendRepository;
+    @Mock
     private StringRedisTemplate redisTemplate;
     @Mock
     private ValueOperations<String, String> valueOperations;
@@ -55,9 +61,13 @@ class FriendServiceImplTest {
         // Real (non-mocked) collaborators wired with the same mocks — sendRequest's actual
         // resolution/rate-limit behavior still runs, just via the extracted classes instead of
         // private methods, so the existing behavioral assertions below don't need to change.
+        // userBlockRepository is left unstubbed in most tests below — Mockito defaults an
+        // unstubbed boolean-returning method to false, which is exactly "not blocked".
         friendService = new FriendServiceImpl(
                 userRepository,
                 friendshipRepository,
+                userBlockRepository,
+                closeFriendRepository,
                 new FriendRequestRateLimiter(redisTemplate),
                 new FriendRequestResolver(friendshipRepository));
     }
@@ -103,6 +113,29 @@ class FriendServiceImplTest {
         assertThrowsErrorCode(() -> friendService.sendRequest(requesterId, addresseeId, null),
                 ErrorCode.REQUESTER_NOT_FOUND);
         verify(userRepository, never()).findByIdAndDeletedAtIsNull(addresseeId);
+    }
+
+    @Test
+    void sendRequest_rejectsWhenRequesterBlockedAddressee() {
+        when(userRepository.findByIdAndDeletedAtIsNull(requesterId)).thenReturn(Optional.of(someUser()));
+        when(userRepository.findByIdAndDeletedAtIsNull(addresseeId)).thenReturn(Optional.of(someUser()));
+        when(userBlockRepository.existsByBlockerIdAndBlockedId(requesterId, addresseeId)).thenReturn(true);
+
+        assertThrowsErrorCode(() -> friendService.sendRequest(requesterId, addresseeId, null),
+                ErrorCode.FRIEND_REQUEST_NOT_ALLOWED);
+        verify(friendshipRepository, never()).findByUnorderedPair(any(), any());
+    }
+
+    @Test
+    void sendRequest_rejectsWhenAddresseeBlockedRequester() {
+        // OR-2-chiều: the block doesn't have to be requester -> addressee to count.
+        when(userRepository.findByIdAndDeletedAtIsNull(requesterId)).thenReturn(Optional.of(someUser()));
+        when(userRepository.findByIdAndDeletedAtIsNull(addresseeId)).thenReturn(Optional.of(someUser()));
+        when(userBlockRepository.existsByBlockerIdAndBlockedId(requesterId, addresseeId)).thenReturn(false);
+        when(userBlockRepository.existsByBlockerIdAndBlockedId(addresseeId, requesterId)).thenReturn(true);
+
+        assertThrowsErrorCode(() -> friendService.sendRequest(requesterId, addresseeId, null),
+                ErrorCode.FRIEND_REQUEST_NOT_ALLOWED);
     }
 
     @Test
@@ -322,6 +355,8 @@ class FriendServiceImplTest {
         friendService.unfriend(requesterId, addresseeId);
 
         verify(friendshipRepository).delete(accepted);
+        verify(closeFriendRepository).deleteById_UserIdAndId_FriendId(requesterId, addresseeId);
+        verify(closeFriendRepository).deleteById_UserIdAndId_FriendId(addresseeId, requesterId);
     }
 
     @Test

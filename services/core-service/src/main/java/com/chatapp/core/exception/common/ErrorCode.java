@@ -27,7 +27,10 @@ public enum ErrorCode {
     FRIEND_REQUEST_RATE_LIMIT_EXCEEDED(2010, "You have reached the daily limit for friend requests", HttpStatus.TOO_MANY_REQUESTS),
 
     // friend/#21-22 (DELETE /friends/requests/{userId}, DELETE /friends/{userId})
-    FRIENDSHIP_NOT_FOUND(2011, "You are not friends with this user", HttpStatus.NOT_FOUND);
+    FRIENDSHIP_NOT_FOUND(2011, "You are not friends with this user", HttpStatus.NOT_FOUND),
+
+    // block/#24-25 (POST /blocks, DELETE /blocks/{userId})
+    SELF_BLOCK_NOT_ALLOWED(2012, "You cannot block yourself", HttpStatus.BAD_REQUEST);
 
     int code;
     String message;

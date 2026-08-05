@@ -78,8 +78,8 @@ com.chatapp.core/
 │   ├── TwoFactorSettingsController.java / TwoFactorSettingsService.java
 │   ├── TwoFactorChallengeDispatcher.java / TwoFactorChallengeStrategy.java (+ Totp.../Email... impl)
 │   └── OtpCodeService.java, OtpMailSender.java, TotpSecretCipher.java, TotpCodeVerifier.java
-├── friend/                    # gửi/chấp nhận lời mời kết bạn (#19/#20) đã có — reject/cancel/unfriend/
-│   │                            # danh sách bạn/close-friends (#21/22/23/26) CHƯA code, xem #19-26
+├── friend/                    # gửi/chấp nhận/từ chối/huỷ lời mời + xoá bạn (#19-22) đã có —
+│   │                            # danh sách bạn/close-friends (#23/26) CHƯA code, xem #19-26
 │   │                            # trong 03-core-service.md mục 3.1
 │   ├── FriendController.java, FriendService.java (interface) / service/FriendServiceImpl.java
 │   └── dto/request/, dto/response/

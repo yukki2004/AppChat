@@ -1,0 +1,134 @@
+package com.chatapp.core.friend.service;
+
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import com.chatapp.core.base.UserResponse;
+import com.chatapp.core.base.constant.FriendshipStatus;
+import com.chatapp.core.base.entity.FriendshipEntity;
+import com.chatapp.core.base.entity.UserEntity;
+import com.chatapp.core.base.repository.FriendshipRepository;
+import com.chatapp.core.base.repository.UserRepository;
+import com.chatapp.core.exception.common.AppException;
+import com.chatapp.core.exception.common.ErrorCode;
+import com.chatapp.core.friend.FriendService;
+import com.chatapp.core.friend.dto.response.FriendRequestResponse;
+import com.chatapp.core.friend.dto.response.SendFriendRequestResponse;
+import com.chatapp.core.friend.util.FriendRequestRateLimiter;
+import com.chatapp.core.friend.util.FriendRequestResolver;
+
+import lombok.RequiredArgsConstructor;
+
+/**
+ * Orchestrates #19/#20 — guard checks (self-action, user exists, block, rate-limit) live here;
+ * the actual "what does sending a request resolve to" decision is delegated to
+ * {@link FriendRequestResolver}, and Redis anti-abuse checks to {@link FriendRequestRateLimiter}
+ * — kept out of this class so it doesn't grow unreadable as more friend/block features land.
+ */
+@Service
+@RequiredArgsConstructor
+public class FriendServiceImpl implements FriendService {
+
+    private final UserRepository userRepository;
+    private final FriendshipRepository friendshipRepository;
+    private final FriendRequestRateLimiter friendRequestRateLimiter;
+    private final FriendRequestResolver friendRequestResolver;
+
+    @Override
+    @Transactional
+    public SendFriendRequestResponse sendRequest(UUID requesterId, UUID addresseeId, String message) {
+        if (requesterId.equals(addresseeId)) {
+            throw new AppException(ErrorCode.SELF_FRIEND_REQUEST_NOT_ALLOWED);
+        }
+
+        // Guards against a soft-deleted user acting on a still-unexpired access_token (up to
+        // 15 min after deletion) — the FK on friendships.requester_id alone wouldn't catch this
+        // since soft-delete never removes the row, only sets deleted_at.
+        userRepository.findByIdAndDeletedAtIsNull(requesterId)
+                .orElseThrow(() -> new AppException(ErrorCode.REQUESTER_NOT_FOUND));
+        userRepository.findByIdAndDeletedAtIsNull(addresseeId)
+                .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_FOUND));
+
+        if (isBlockedEitherDirection(requesterId, addresseeId)) {
+            throw new AppException(ErrorCode.FRIEND_REQUEST_NOT_ALLOWED);
+        }
+
+        // friendRequestRateLimiter.checkCooldown(requesterId, addresseeId); — disabled by
+        // product decision: rejecting someone should not block them from trying again later.
+        friendRequestRateLimiter.checkRateLimit(requesterId);
+
+        // TODO: publish friend.request_sent (RoutingKeys.UserExchange, user.exchange) once the
+        // outbox pattern is wired up for this service — see skills/outbox-pattern.md. Per
+        // docs/.../02-rabbitmq-exchange-map.md the documented consumer is Notification Service
+        // (push FCM/APNs/in-app to the addressee). Separately — NOT in the current spec, a
+        // decision to confirm later — Realtime Gateway could also consume the same event to
+        // push a live WS update to the addressee if they're already connected
+        // (cache:ws:user:{user_id}), so the incoming-requests screen updates instantly instead
+        // of waiting for the user to reopen/refresh it via GET /friends/requests/incoming. The
+        // auto-accept branch (FriendRequestResolver returning "ACCEPTED") should publish
+        // friend.accepted instead — same TODO reasoning as FriendServiceImpl.accept().
+
+        return friendRequestResolver.resolve(requesterId, addresseeId, message);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<FriendRequestResponse> listIncomingPending(UUID userId) {
+        List<FriendshipEntity> pending = friendshipRepository.findIncomingPending(userId);
+        Map<UUID, UserEntity> otherUsers = loadOtherUsers(pending, FriendshipEntity::getRequesterId);
+        return pending.stream()
+                .map(f -> toResponse(f, otherUsers.get(f.getRequesterId())))
+                .filter(java.util.Objects::nonNull)
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<FriendRequestResponse> listOutgoingPending(UUID userId) {
+        List<FriendshipEntity> pending = friendshipRepository.findOutgoingPending(userId);
+        Map<UUID, UserEntity> otherUsers = loadOtherUsers(pending, FriendshipEntity::getAddresseeId);
+        return pending.stream()
+                .map(f -> toResponse(f, otherUsers.get(f.getAddresseeId())))
+                .filter(java.util.Objects::nonNull)
+                .toList();
+    }
+
+    @Override
+    @Transactional
+    public void accept(UUID currentUserId, UUID otherUserId) {
+        FriendshipEntity friendship = friendshipRepository.findByUnorderedPair(currentUserId, otherUserId)
+                .filter(f -> f.getStatus() == FriendshipStatus.PENDING && f.getAddresseeId().equals(currentUserId))
+                .orElseThrow(() -> new AppException(ErrorCode.FRIEND_REQUEST_NOT_FOUND));
+
+        friendship.accept();
+        friendshipRepository.save(friendship);
+        // TODO: publish friend.accepted (RoutingKeys.UserExchange) once the outbox pattern is
+        // wired up for this service — see skills/outbox-pattern.md.
+    }
+
+    private boolean isBlockedEitherDirection(UUID a, UUID b) {
+        // TODO: no user_blocks table/repository yet (#24/#25 not implemented) — wire this up to
+        // UserBlockRepository.existsByBlockerIdAndBlockedId(a,b) || (b,a) once that batch lands.
+        return false;
+    }
+
+    private Map<UUID, UserEntity> loadOtherUsers(
+            List<FriendshipEntity> friendships, Function<FriendshipEntity, UUID> otherIdOf) {
+        List<UUID> otherIds = friendships.stream().map(otherIdOf).distinct().toList();
+        return userRepository.findAllById(otherIds).stream()
+                .collect(Collectors.toMap(UserEntity::getId, Function.identity()));
+    }
+
+    private FriendRequestResponse toResponse(FriendshipEntity friendship, UserEntity otherUser) {
+        if (otherUser == null) {
+            return null;
+        }
+        return new FriendRequestResponse(UserResponse.from(otherUser), friendship.getMessage(), friendship.getCreatedAt());
+    }
+}

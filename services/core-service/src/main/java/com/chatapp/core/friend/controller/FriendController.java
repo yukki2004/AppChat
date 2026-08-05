@@ -1,0 +1,54 @@
+package com.chatapp.core.friend.controller;
+
+import java.util.List;
+import java.util.UUID;
+
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+import com.chatapp.core.base.ApiResponse;
+import com.chatapp.core.friend.FriendService;
+import com.chatapp.core.friend.dto.request.SendFriendRequestRequest;
+import com.chatapp.core.friend.dto.response.FriendRequestResponse;
+import com.chatapp.core.friend.dto.response.SendFriendRequestResponse;
+
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+
+@RestController
+@RequestMapping("/friends")
+@RequiredArgsConstructor
+public class FriendController {
+
+    private final FriendService friendService;
+
+    @PostMapping("/requests")
+    public ResponseEntity<ApiResponse<SendFriendRequestResponse>> sendRequest(
+            @RequestHeader("X-User-Id") UUID userId, @Valid @RequestBody SendFriendRequestRequest request) {
+        SendFriendRequestResponse result = friendService.sendRequest(userId, request.getAddresseeId(), request.getMessage());
+        return ResponseEntity.ok(ApiResponse.ok(result));
+    }
+
+    @GetMapping("/requests/incoming")
+    public ResponseEntity<ApiResponse<List<FriendRequestResponse>>> incoming(@RequestHeader("X-User-Id") UUID userId) {
+        return ResponseEntity.ok(ApiResponse.ok(friendService.listIncomingPending(userId)));
+    }
+
+    @GetMapping("/requests/outgoing")
+    public ResponseEntity<ApiResponse<List<FriendRequestResponse>>> outgoing(@RequestHeader("X-User-Id") UUID userId) {
+        return ResponseEntity.ok(ApiResponse.ok(friendService.listOutgoingPending(userId)));
+    }
+
+    @PostMapping("/requests/{userId}/accept")
+    public ResponseEntity<ApiResponse<Void>> accept(
+            @RequestHeader("X-User-Id") UUID currentUserId, @PathVariable UUID userId) {
+        friendService.accept(currentUserId, userId);
+        return ResponseEntity.ok(ApiResponse.ok());
+    }
+}

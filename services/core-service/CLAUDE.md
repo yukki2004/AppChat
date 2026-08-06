@@ -78,17 +78,20 @@ com.chatapp.core/
 │   ├── TwoFactorSettingsController.java / TwoFactorSettingsService.java
 │   ├── TwoFactorChallengeDispatcher.java / TwoFactorChallengeStrategy.java (+ Totp.../Email... impl)
 │   └── OtpCodeService.java, OtpMailSender.java, TotpSecretCipher.java, TotpCodeVerifier.java
-├── friend/                    # gửi/chấp nhận/từ chối/huỷ lời mời + xoá bạn (#19-22) đã có —
-│   │                            # danh sách bạn/close-friends (#23/26) CHƯA code, xem #19-26
-│   │                            # trong 03-core-service.md mục 3.1
+├── friend/                    # gửi/chấp nhận/từ chối/huỷ lời mời/xoá bạn/danh sách bạn/close
+│   │                            # friends (#19-23, #26) đã có, xem 03-core-service.md mục 3.1
 │   ├── FriendController.java, FriendService.java (interface) / service/FriendServiceImpl.java
 │   └── dto/request/, dto/response/
-├── block/                     # chặn/gỡ chặn/danh sách đã chặn (#24-25) đã có — close_friends
-│   │                            # table đã tạo migration cùng batch này (cascade cần) nhưng
-│   │                            # endpoint quản lý close friends (#26) CHƯA code
+├── block/                     # chặn/gỡ chặn/danh sách đã chặn (#24-25) đã có — full block
+│   │                            # only (v1), scope hẹp hơn (chặn tin/gọi riêng) là TODO chưa
+│   │                            # lên lịch, xem TODO trong UserBlockEntity + 03-core-service.md
 │   ├── BlockController.java, BlockService.java (interface) / service/BlockServiceImpl.java
 │   └── dto/request/
-├── profile/, privacy/            # thêm sau, cùng khuôn mẫu (Controller/Service/DTO — Entity/
+├── profile/                   # CHỈ có #27 (xem profile người khác, read-only) — #15 (cập nhật
+│   │                            # profile) CHƯA code, xem TODO privacy_settings (#16) trong
+│   │                            # ProfileServiceImpl
+│   ├── ProfileController.java, ProfileService.java (interface) / service/ProfileServiceImpl.java
+├── privacy/                   # thêm sau, cùng khuôn mẫu (Controller/Service/DTO — Entity/
 │                              # Repository mới thêm vào base/, không tạo trong domain)
 ├── group/                    # domain nặng nhất — có thể lại chia sub-package member/, file/, event/
 ├── security/                  # JwtKeyManager, JwtTokenProvider, JwksController — chỉ còn đúng phần

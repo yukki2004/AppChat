@@ -481,6 +481,16 @@ lọc `OR` trực tiếp trên 2 cột đó, không dùng được unique index 
 `GET /friends/requests/incoming`, `GET /friends/requests/outgoing` — liệt kê lời mời đang
 PENDING theo 2 chiều nhận/gửi.
 
+**#23 Danh sách bạn bè** (`GET /friends`): trả `List<UserResponse>` thuần, KHÔNG có
+`PublicPresenceDTO` như mô tả gốc — chưa có client gRPC Presence nào trong codebase (Presence
+thuộc Realtime Gateway, không phải Core Service), ghi TODO trong code, nối khi Presence sẵn sàng.
+
+**#26 Danh sách bạn thân (Close Friends)**: 1 chiều (A đánh dấu B là bạn thân không có nghĩa B
+đánh dấu A) — đúng bản chất product feature, không cascade ngược. Muốn thêm ai vào close friends
+thì 2 người phải đang ACCEPTED trong `friendships` trước (lỗi `FRIENDSHIP_NOT_FOUND` nếu chưa),
+add/remove đều idempotent. Route: `POST /friends/close/{userId}`, `DELETE /friends/close/{userId}`,
+`GET /friends/close`.
+
 **Block là tường chắn toàn diện** (#24): chặn ai → xoá luôn row `friendships` giữa 2 người (bất
 kể status nào) + xoá cả 2 chiều trong `close_friends`. Check block ở #19 (gửi lời mời) là OR
 2 chiều (A chặn B **hoặc** B chặn A đều chặn được), trả lỗi chung `FRIEND_REQUEST_NOT_ALLOWED`,
@@ -506,6 +516,13 @@ vẫn thấy profile nhau, chỉ mute nhắn tin + gọi, độc lập với ful
   `SEND_FRIEND_REQUEST`/`VIEW_PROFILE` → chỉ chặn nếu row là `FULL`). Messaging Service/Call
   Service phải tự gọi gRPC này trước khi cho gửi tin/bắt đầu gọi — Core Service không chủ động
   can thiệp vào luồng của service khác.
+
+**#27 Xem profile người khác** (`GET /users/{userId}`, domain mới `profile/`): trả
+`USER_NOT_FOUND` (404) cả 2 trường hợp — user không tồn tại VÀ 1 trong 2 người chặn nhau (OR
+2 chiều) — dùng CHUNG 1 error code để người bị chặn không phân biệt được "bị chặn" với "không
+tồn tại". Check `privacy_settings.who_can_see_profile` (#16) BỎ QUA — domain Privacy chưa code,
+mọi profile hiện public hoàn toàn với viewer không bị chặn, ghi TODO trong code, nối khi #16
+xong (cùng lý do đã bỏ qua `who_can_add_friend` ở #19).
 
 ### **ð user_blocks  [PostgreSQL]**
 

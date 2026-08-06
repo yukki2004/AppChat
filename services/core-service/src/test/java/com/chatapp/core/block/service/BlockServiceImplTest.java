@@ -27,6 +27,7 @@ import com.chatapp.core.base.repository.UserBlockRepository;
 import com.chatapp.core.base.repository.UserRepository;
 import com.chatapp.core.exception.common.AppException;
 import com.chatapp.core.exception.common.ErrorCode;
+import com.chatapp.core.lock.PairLockService;
 
 @ExtendWith(MockitoExtension.class)
 class BlockServiceImplTest {
@@ -39,6 +40,8 @@ class BlockServiceImplTest {
     private FriendshipRepository friendshipRepository;
     @Mock
     private CloseFriendRepository closeFriendRepository;
+    @Mock
+    private PairLockService pairLockService;
 
     private BlockServiceImpl blockService;
 
@@ -47,7 +50,8 @@ class BlockServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        blockService = new BlockServiceImpl(userRepository, userBlockRepository, friendshipRepository, closeFriendRepository);
+        blockService = new BlockServiceImpl(
+                userRepository, userBlockRepository, friendshipRepository, closeFriendRepository, pairLockService);
     }
 
     private UserEntity someUser() {

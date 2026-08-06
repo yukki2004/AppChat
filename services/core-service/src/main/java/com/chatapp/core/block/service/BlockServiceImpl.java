@@ -20,9 +20,18 @@ import com.chatapp.core.base.repository.UserRepository;
 import com.chatapp.core.block.BlockService;
 import com.chatapp.core.exception.common.AppException;
 import com.chatapp.core.exception.common.ErrorCode;
+import com.chatapp.core.lock.PairLockService;
 
 import lombok.RequiredArgsConstructor;
 
+/**
+ * {@link #block} acquires {@link PairLockService} FIRST, before any check — otherwise a
+ * concurrent {@code FriendServiceImpl.sendRequest()}/{@code accept()} racing on the same pair can
+ * interleave and leave a friendship row alive right after a block "cascades" a delete that missed
+ * it (write skew: the two transactions touch {@code user_blocks} and {@code friendships}
+ * separately, so no unique constraint on either table catches it). See {@link PairLockService}
+ * javadoc.
+ */
 @Service
 @RequiredArgsConstructor
 public class BlockServiceImpl implements BlockService {
@@ -31,6 +40,7 @@ public class BlockServiceImpl implements BlockService {
     private final UserBlockRepository userBlockRepository;
     private final FriendshipRepository friendshipRepository;
     private final CloseFriendRepository closeFriendRepository;
+    private final PairLockService pairLockService;
 
     @Override
     @Transactional
@@ -38,6 +48,7 @@ public class BlockServiceImpl implements BlockService {
         if (blockerId.equals(blockedId)) {
             throw new AppException(ErrorCode.SELF_BLOCK_NOT_ALLOWED);
         }
+        pairLockService.lock(blockerId, blockedId);
         userRepository.findByIdAndDeletedAtIsNull(blockedId)
                 .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_FOUND));
 

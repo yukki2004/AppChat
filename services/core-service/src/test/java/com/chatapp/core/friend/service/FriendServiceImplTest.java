@@ -31,6 +31,7 @@ import com.chatapp.core.exception.common.AppException;
 import com.chatapp.core.exception.common.ErrorCode;
 import com.chatapp.core.friend.dto.response.SendFriendRequestResponse;
 import com.chatapp.core.friend.util.FriendRequestResolver;
+import com.chatapp.core.lock.PairLockService;
 
 @ExtendWith(MockitoExtension.class)
 class FriendServiceImplTest {
@@ -43,6 +44,9 @@ class FriendServiceImplTest {
     private UserBlockRepository userBlockRepository;
     @Mock
     private CloseFriendRepository closeFriendRepository;
+    @Mock
+    private PairLockService pairLockService;
+
     private FriendServiceImpl friendService;
 
     private final UUID requesterId = UUID.randomUUID();
@@ -57,7 +61,8 @@ class FriendServiceImplTest {
                 friendshipRepository,
                 userBlockRepository,
                 closeFriendRepository,
-                new FriendRequestResolver(friendshipRepository));
+                new FriendRequestResolver(friendshipRepository),
+                pairLockService);
     }
 
     private UserEntity someUser() {
@@ -98,26 +103,17 @@ class FriendServiceImplTest {
     }
 
     @Test
-    void sendRequest_rejectsWhenRequesterBlockedAddressee() {
+    void sendRequest_rejectsWhenEitherDirectionBlocked() {
+        // OR-2-chiều collapsed into 1 round-trip query now — the caller can't tell (and doesn't
+        // need to) which side actually blocked which.
         when(userRepository.findByIdAndDeletedAtIsNull(requesterId)).thenReturn(Optional.of(someUser()));
         when(userRepository.findByIdAndDeletedAtIsNull(addresseeId)).thenReturn(Optional.of(someUser()));
-        when(userBlockRepository.existsByBlockerIdAndBlockedId(requesterId, addresseeId)).thenReturn(true);
+        when(userBlockRepository.existsByBlockerIdAndBlockedIdOrBlockerIdAndBlockedId(
+                requesterId, addresseeId, addresseeId, requesterId)).thenReturn(true);
 
         assertThrowsErrorCode(() -> friendService.sendRequest(requesterId, addresseeId, null),
                 ErrorCode.FRIEND_REQUEST_NOT_ALLOWED);
         verify(friendshipRepository, never()).findByUnorderedPair(any(), any());
-    }
-
-    @Test
-    void sendRequest_rejectsWhenAddresseeBlockedRequester() {
-        // OR-2-chiều: the block doesn't have to be requester -> addressee to count.
-        when(userRepository.findByIdAndDeletedAtIsNull(requesterId)).thenReturn(Optional.of(someUser()));
-        when(userRepository.findByIdAndDeletedAtIsNull(addresseeId)).thenReturn(Optional.of(someUser()));
-        when(userBlockRepository.existsByBlockerIdAndBlockedId(requesterId, addresseeId)).thenReturn(false);
-        when(userBlockRepository.existsByBlockerIdAndBlockedId(addresseeId, requesterId)).thenReturn(true);
-
-        assertThrowsErrorCode(() -> friendService.sendRequest(requesterId, addresseeId, null),
-                ErrorCode.FRIEND_REQUEST_NOT_ALLOWED);
     }
 
     @Test

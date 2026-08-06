@@ -28,9 +28,10 @@ public class ProfileServiceImpl implements ProfileService {
                 .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_FOUND));
 
         // Same error as "doesn't exist" on purpose — a blocked viewer must not be able to tell
-        // blocked apart from deleted/never-existed. OR-2-chiều: either side blocking hides it.
-        if (userBlockRepository.existsByBlockerIdAndBlockedId(viewerId, targetUserId)
-                || userBlockRepository.existsByBlockerIdAndBlockedId(targetUserId, viewerId)) {
+        // blocked apart from deleted/never-existed. OR-2-chiều: either side blocking hides it,
+        // gộp thành 1 query (giống isBlockedEitherDirection ở FriendServiceImpl.sendRequest).
+        if (userBlockRepository.existsByBlockerIdAndBlockedIdOrBlockerIdAndBlockedId(
+                viewerId, targetUserId, targetUserId, viewerId)) {
             throw new AppException(ErrorCode.USER_NOT_FOUND);
         }
 

@@ -25,6 +25,7 @@ import com.chatapp.core.friend.FriendService;
 import com.chatapp.core.friend.dto.response.FriendRequestResponse;
 import com.chatapp.core.friend.dto.response.SendFriendRequestResponse;
 import com.chatapp.core.friend.util.FriendRequestResolver;
+import com.chatapp.core.lock.PairLockService;
 
 import lombok.RequiredArgsConstructor;
 
@@ -32,6 +33,12 @@ import lombok.RequiredArgsConstructor;
  * Orchestrates #19-22 — guard checks (self-action, user exists, block) live here; the actual
  * "what does sending a request resolve to" decision is delegated to {@link FriendRequestResolver}
  * — kept out of this class so it doesn't grow unreadable as more friend/block features land.
+ *
+ * <p>Every method here that reads-then-writes {@code friendships}/{@code close_friends} for a
+ * pair acquires {@link PairLockService} FIRST, before any check — otherwise a concurrent
+ * {@code BlockServiceImpl.block()} (or another one of these methods, racing on the same pair)
+ * can interleave and leave inconsistent state that no unique constraint catches, since the 2
+ * transactions touch different tables/rows (write skew). See {@link PairLockService} javadoc.
  */
 @Service
 @RequiredArgsConstructor
@@ -42,6 +49,7 @@ public class FriendServiceImpl implements FriendService {
     private final UserBlockRepository userBlockRepository;
     private final CloseFriendRepository closeFriendRepository;
     private final FriendRequestResolver friendRequestResolver;
+    private final PairLockService pairLockService;
 
     @Override
     @Transactional
@@ -49,6 +57,7 @@ public class FriendServiceImpl implements FriendService {
         if (requesterId.equals(addresseeId)) {
             throw new AppException(ErrorCode.SELF_FRIEND_REQUEST_NOT_ALLOWED);
         }
+        pairLockService.lock(requesterId, addresseeId);
 
         // Guards against a soft-deleted user acting on a still-unexpired access_token (up to
         // 15 min after deletion) — the FK on friendships.requester_id alone wouldn't catch this
@@ -101,6 +110,7 @@ public class FriendServiceImpl implements FriendService {
     @Override
     @Transactional
     public void accept(UUID currentUserId, UUID otherUserId) {
+        pairLockService.lock(currentUserId, otherUserId);
         // Only the addressee may accept, so the direction is already known here — no need for
         // the OR-based findByUnorderedPair used where the caller's role isn't known yet (see
         // cancelOrReject below).
@@ -117,6 +127,7 @@ public class FriendServiceImpl implements FriendService {
     @Override
     @Transactional
     public void cancelOrReject(UUID currentUserId, UUID otherUserId) {
+        pairLockService.lock(currentUserId, otherUserId);
         FriendshipEntity friendship = friendshipRepository.findByUnorderedPair(currentUserId, otherUserId)
                 .filter(f -> f.getStatus() == FriendshipStatus.PENDING)
                 .orElseThrow(() -> new AppException(ErrorCode.FRIEND_REQUEST_NOT_FOUND));
@@ -135,6 +146,7 @@ public class FriendServiceImpl implements FriendService {
     @Override
     @Transactional
     public void unfriend(UUID currentUserId, UUID otherUserId) {
+        pairLockService.lock(currentUserId, otherUserId);
         FriendshipEntity friendship = friendshipRepository.findByUnorderedPair(currentUserId, otherUserId)
                 .filter(f -> f.getStatus() == FriendshipStatus.ACCEPTED)
                 .orElseThrow(() -> new AppException(ErrorCode.FRIENDSHIP_NOT_FOUND));
@@ -169,6 +181,7 @@ public class FriendServiceImpl implements FriendService {
         if (userId.equals(targetUserId)) {
             throw new AppException(ErrorCode.SELF_CLOSE_FRIEND_NOT_ALLOWED);
         }
+        pairLockService.lock(userId, targetUserId);
         friendshipRepository.findByUnorderedPair(userId, targetUserId)
                 .filter(f -> f.getStatus() == FriendshipStatus.ACCEPTED)
                 .orElseThrow(() -> new AppException(ErrorCode.FRIENDSHIP_NOT_FOUND));
@@ -204,8 +217,7 @@ public class FriendServiceImpl implements FriendService {
     // column (FULL vs a narrower message/call-only block), this check must filter to FULL only
     // — a message/call-only block should NOT stop a friend request.
     private boolean isBlockedEitherDirection(UUID a, UUID b) {
-        return userBlockRepository.existsByBlockerIdAndBlockedId(a, b)
-                || userBlockRepository.existsByBlockerIdAndBlockedId(b, a);
+        return userBlockRepository.existsByBlockerIdAndBlockedIdOrBlockerIdAndBlockedId(a, b, b, a);
     }
 
     private Map<UUID, UserEntity> loadOtherUsers(

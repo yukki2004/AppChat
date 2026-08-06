@@ -13,14 +13,11 @@ import java.util.UUID;
 
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.core.ValueOperations;
 
 import com.chatapp.core.base.constant.FriendshipStatus;
 import com.chatapp.core.base.entity.CloseFriendEntity;
@@ -33,7 +30,6 @@ import com.chatapp.core.base.repository.UserRepository;
 import com.chatapp.core.exception.common.AppException;
 import com.chatapp.core.exception.common.ErrorCode;
 import com.chatapp.core.friend.dto.response.SendFriendRequestResponse;
-import com.chatapp.core.friend.util.FriendRequestRateLimiter;
 import com.chatapp.core.friend.util.FriendRequestResolver;
 
 @ExtendWith(MockitoExtension.class)
@@ -47,11 +43,6 @@ class FriendServiceImplTest {
     private UserBlockRepository userBlockRepository;
     @Mock
     private CloseFriendRepository closeFriendRepository;
-    @Mock
-    private StringRedisTemplate redisTemplate;
-    @Mock
-    private ValueOperations<String, String> valueOperations;
-
     private FriendServiceImpl friendService;
 
     private final UUID requesterId = UUID.randomUUID();
@@ -59,9 +50,6 @@ class FriendServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        // Real (non-mocked) collaborators wired with the same mocks — sendRequest's actual
-        // resolution/rate-limit behavior still runs, just via the extracted classes instead of
-        // private methods, so the existing behavioral assertions below don't need to change.
         // userBlockRepository is left unstubbed in most tests below — Mockito defaults an
         // unstubbed boolean-returning method to false, which is exactly "not blocked".
         friendService = new FriendServiceImpl(
@@ -69,14 +57,7 @@ class FriendServiceImplTest {
                 friendshipRepository,
                 userBlockRepository,
                 closeFriendRepository,
-                new FriendRequestRateLimiter(redisTemplate),
                 new FriendRequestResolver(friendshipRepository));
-    }
-
-    private void stubNoRateLimitOrCooldown() {
-        // hasKey() not stubbed — checkCooldown() call is commented out in sendRequest() for now.
-        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-        when(valueOperations.increment(any())).thenReturn(1L);
     }
 
     private UserEntity someUser() {
@@ -143,7 +124,6 @@ class FriendServiceImplTest {
     void sendRequest_insertsFreshPendingRow_whenNoExistingRow() {
         when(userRepository.findByIdAndDeletedAtIsNull(requesterId)).thenReturn(Optional.of(someUser()));
         when(userRepository.findByIdAndDeletedAtIsNull(addresseeId)).thenReturn(Optional.of(someUser()));
-        stubNoRateLimitOrCooldown();
         when(friendshipRepository.findByUnorderedPair(requesterId, addresseeId)).thenReturn(Optional.empty());
 
         SendFriendRequestResponse result = friendService.sendRequest(requesterId, addresseeId, "hi");
@@ -158,7 +138,6 @@ class FriendServiceImplTest {
         FriendshipEntity reversePending = new FriendshipEntity(addresseeId, requesterId, "hey");
         when(userRepository.findByIdAndDeletedAtIsNull(requesterId)).thenReturn(Optional.of(someUser()));
         when(userRepository.findByIdAndDeletedAtIsNull(addresseeId)).thenReturn(Optional.of(someUser()));
-        stubNoRateLimitOrCooldown();
         when(friendshipRepository.findByUnorderedPair(requesterId, addresseeId)).thenReturn(Optional.of(reversePending));
 
         SendFriendRequestResponse result = friendService.sendRequest(requesterId, addresseeId, "hi back");
@@ -173,7 +152,6 @@ class FriendServiceImplTest {
         FriendshipEntity samePending = new FriendshipEntity(requesterId, addresseeId, "hi");
         when(userRepository.findByIdAndDeletedAtIsNull(requesterId)).thenReturn(Optional.of(someUser()));
         when(userRepository.findByIdAndDeletedAtIsNull(addresseeId)).thenReturn(Optional.of(someUser()));
-        stubNoRateLimitOrCooldown();
         when(friendshipRepository.findByUnorderedPair(requesterId, addresseeId)).thenReturn(Optional.of(samePending));
 
         assertThrowsErrorCode(() -> friendService.sendRequest(requesterId, addresseeId, "hi again"),
@@ -186,7 +164,6 @@ class FriendServiceImplTest {
         accepted.accept();
         when(userRepository.findByIdAndDeletedAtIsNull(requesterId)).thenReturn(Optional.of(someUser()));
         when(userRepository.findByIdAndDeletedAtIsNull(addresseeId)).thenReturn(Optional.of(someUser()));
-        stubNoRateLimitOrCooldown();
         when(friendshipRepository.findByUnorderedPair(requesterId, addresseeId)).thenReturn(Optional.of(accepted));
 
         assertThrowsErrorCode(() -> friendService.sendRequest(requesterId, addresseeId, null),
@@ -199,7 +176,6 @@ class FriendServiceImplTest {
         rejected.reject();
         when(userRepository.findByIdAndDeletedAtIsNull(requesterId)).thenReturn(Optional.of(someUser()));
         when(userRepository.findByIdAndDeletedAtIsNull(addresseeId)).thenReturn(Optional.of(someUser()));
-        stubNoRateLimitOrCooldown();
         when(friendshipRepository.findByUnorderedPair(requesterId, addresseeId)).thenReturn(Optional.of(rejected));
 
         SendFriendRequestResponse result = friendService.sendRequest(requesterId, addresseeId, "new try");
@@ -211,30 +187,6 @@ class FriendServiceImplTest {
         verify(friendshipRepository).save(rejected);
     }
 
-    @Disabled("checkCooldown() call is commented out in sendRequest() for now — see FriendServiceImpl")
-    @Test
-    void sendRequest_blockedByCooldown_afterRejection() {
-        when(userRepository.findByIdAndDeletedAtIsNull(requesterId)).thenReturn(Optional.of(someUser()));
-        when(userRepository.findByIdAndDeletedAtIsNull(addresseeId)).thenReturn(Optional.of(someUser()));
-        when(redisTemplate.hasKey(any())).thenReturn(true);
-
-        assertThrowsErrorCode(() -> friendService.sendRequest(requesterId, addresseeId, null),
-                ErrorCode.FRIEND_REQUEST_COOLDOWN);
-        verify(friendshipRepository, never()).findByUnorderedPair(any(), any());
-    }
-
-    @Test
-    void sendRequest_rejectsWhenDailyRateLimitExceeded() {
-        when(userRepository.findByIdAndDeletedAtIsNull(requesterId)).thenReturn(Optional.of(someUser()));
-        when(userRepository.findByIdAndDeletedAtIsNull(addresseeId)).thenReturn(Optional.of(someUser()));
-        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-        when(valueOperations.increment(any())).thenReturn(51L);
-
-        assertThrowsErrorCode(() -> friendService.sendRequest(requesterId, addresseeId, null),
-                ErrorCode.FRIEND_REQUEST_RATE_LIMIT_EXCEEDED);
-        verify(friendshipRepository, never()).findByUnorderedPair(any(), any());
-    }
-
     @Test
     void sendRequest_resolvesRaceCondition_asAutoAccept() {
         // Both sides passed the pre-check with no existing row, then this insert lost the race
@@ -242,7 +194,6 @@ class FriendServiceImplTest {
         FriendshipEntity winner = new FriendshipEntity(addresseeId, requesterId, "raced in first");
         when(userRepository.findByIdAndDeletedAtIsNull(requesterId)).thenReturn(Optional.of(someUser()));
         when(userRepository.findByIdAndDeletedAtIsNull(addresseeId)).thenReturn(Optional.of(someUser()));
-        stubNoRateLimitOrCooldown();
         when(friendshipRepository.findByUnorderedPair(requesterId, addresseeId))
                 .thenReturn(Optional.empty())
                 .thenReturn(Optional.of(winner));
@@ -324,8 +275,6 @@ class FriendServiceImplTest {
 
         assertThat(pending.getStatus()).isEqualTo(FriendshipStatus.REJECTED);
         verify(friendshipRepository).save(pending);
-        // Cooldown is intentionally not set — checkCooldown() is disabled by product decision.
-        verify(redisTemplate, never()).opsForValue();
     }
 
     @Test

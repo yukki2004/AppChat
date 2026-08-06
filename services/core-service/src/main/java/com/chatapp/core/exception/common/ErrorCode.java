@@ -23,8 +23,6 @@ public enum ErrorCode {
     FRIEND_REQUEST_ALREADY_SENT(2006, "You have already sent a friend request to this user", HttpStatus.CONFLICT),
     FRIENDSHIP_ALREADY_EXISTS(2007, "A friendship already exists with this user", HttpStatus.CONFLICT),
     FRIEND_REQUEST_NOT_FOUND(2008, "No pending friend request from this user", HttpStatus.NOT_FOUND),
-    FRIEND_REQUEST_COOLDOWN(2009, "You must wait before sending another request to this user", HttpStatus.TOO_MANY_REQUESTS),
-    FRIEND_REQUEST_RATE_LIMIT_EXCEEDED(2010, "You have reached the daily limit for friend requests", HttpStatus.TOO_MANY_REQUESTS),
 
     // friend/#21-22 (DELETE /friends/requests/{userId}, DELETE /friends/{userId})
     FRIENDSHIP_NOT_FOUND(2011, "You are not friends with this user", HttpStatus.NOT_FOUND),

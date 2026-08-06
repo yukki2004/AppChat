@@ -24,15 +24,13 @@ import com.chatapp.core.exception.common.ErrorCode;
 import com.chatapp.core.friend.FriendService;
 import com.chatapp.core.friend.dto.response.FriendRequestResponse;
 import com.chatapp.core.friend.dto.response.SendFriendRequestResponse;
-import com.chatapp.core.friend.util.FriendRequestRateLimiter;
 import com.chatapp.core.friend.util.FriendRequestResolver;
 
 import lombok.RequiredArgsConstructor;
 
 /**
- * Orchestrates #19-22 — guard checks (self-action, user exists, block, rate-limit) live here;
- * the actual "what does sending a request resolve to" decision is delegated to
- * {@link FriendRequestResolver}, and Redis anti-abuse checks to {@link FriendRequestRateLimiter}
+ * Orchestrates #19-22 — guard checks (self-action, user exists, block) live here; the actual
+ * "what does sending a request resolve to" decision is delegated to {@link FriendRequestResolver}
  * — kept out of this class so it doesn't grow unreadable as more friend/block features land.
  */
 @Service
@@ -43,7 +41,6 @@ public class FriendServiceImpl implements FriendService {
     private final FriendshipRepository friendshipRepository;
     private final UserBlockRepository userBlockRepository;
     private final CloseFriendRepository closeFriendRepository;
-    private final FriendRequestRateLimiter friendRequestRateLimiter;
     private final FriendRequestResolver friendRequestResolver;
 
     @Override
@@ -64,10 +61,6 @@ public class FriendServiceImpl implements FriendService {
         if (isBlockedEitherDirection(requesterId, addresseeId)) {
             throw new AppException(ErrorCode.FRIEND_REQUEST_NOT_ALLOWED);
         }
-
-        // friendRequestRateLimiter.checkCooldown(requesterId, addresseeId); — disabled by
-        // product decision: rejecting someone should not block them from trying again later.
-        friendRequestRateLimiter.checkRateLimit(requesterId);
 
         // TODO: publish friend.request_sent (RoutingKeys.UserExchange, user.exchange) once the
         // outbox pattern is wired up for this service — see skills/outbox-pattern.md. Per
@@ -132,9 +125,6 @@ public class FriendServiceImpl implements FriendService {
             friendship.cancel();
         } else {
             friendship.reject();
-            // Cooldown (docs/.../03-core-service.md #9b) is intentionally NOT set here — product
-            // decision, see the disabled FriendRequestRateLimiter.checkCooldown() call in
-            // sendRequest() above: rejecting someone should not block them from trying again.
         }
         friendshipRepository.save(friendship);
         // No event to publish here per docs/.../02-rabbitmq-exchange-map.md — friend.request_sent

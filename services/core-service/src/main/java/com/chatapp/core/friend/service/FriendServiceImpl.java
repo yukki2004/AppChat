@@ -2,6 +2,7 @@ package com.chatapp.core.friend.service;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -11,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.chatapp.core.base.UserResponse;
 import com.chatapp.core.base.constant.FriendshipStatus;
+import com.chatapp.core.base.entity.CloseFriendEntity;
 import com.chatapp.core.base.entity.FriendshipEntity;
 import com.chatapp.core.base.entity.UserEntity;
 import com.chatapp.core.base.repository.CloseFriendRepository;
@@ -152,6 +154,60 @@ public class FriendServiceImpl implements FriendService {
         closeFriendRepository.deleteById_UserIdAndId_FriendId(otherUserId, currentUserId);
         // TODO: publish friend.removed (RoutingKeys.UserExchange) once the outbox pattern is
         // wired up for this service — see skills/outbox-pattern.md.
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<UserResponse> listFriends(UUID userId) {
+        // TODO: PublicPresenceDTO (gRPC Presence) per docs/.../03-core-service.md #23 is skipped
+        // — no Presence Service client exists anywhere in this codebase yet (Realtime Gateway
+        // owns presence, not Core Service). Returns plain public user info only.
+        Function<FriendshipEntity, UUID> otherIdOf =
+                f -> f.getRequesterId().equals(userId) ? f.getAddresseeId() : f.getRequesterId();
+        List<FriendshipEntity> accepted = friendshipRepository.findAllAcceptedForUser(userId);
+        Map<UUID, UserEntity> otherUsers = loadOtherUsers(accepted, otherIdOf);
+        return accepted.stream()
+                .map(f -> otherUsers.get(otherIdOf.apply(f)))
+                .filter(Objects::nonNull)
+                .map(UserResponse::from)
+                .toList();
+    }
+
+    @Override
+    @Transactional
+    public void addCloseFriend(UUID userId, UUID targetUserId) {
+        if (userId.equals(targetUserId)) {
+            throw new AppException(ErrorCode.SELF_CLOSE_FRIEND_NOT_ALLOWED);
+        }
+        friendshipRepository.findByUnorderedPair(userId, targetUserId)
+                .filter(f -> f.getStatus() == FriendshipStatus.ACCEPTED)
+                .orElseThrow(() -> new AppException(ErrorCode.FRIENDSHIP_NOT_FOUND));
+
+        if (closeFriendRepository.existsById_UserIdAndId_FriendId(userId, targetUserId)) {
+            return;
+        }
+        closeFriendRepository.save(new CloseFriendEntity(userId, targetUserId));
+    }
+
+    @Override
+    @Transactional
+    public void removeCloseFriend(UUID userId, UUID targetUserId) {
+        closeFriendRepository.deleteById_UserIdAndId_FriendId(userId, targetUserId);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<UserResponse> listCloseFriends(UUID userId) {
+        List<CloseFriendEntity> closeFriends = closeFriendRepository.findById_UserId(userId);
+        List<UUID> friendIds = closeFriends.stream().map(cf -> cf.getId().getFriendId()).distinct().toList();
+        Map<UUID, UserEntity> friends = userRepository.findAllById(friendIds).stream()
+                .collect(Collectors.toMap(UserEntity::getId, Function.identity()));
+
+        return closeFriends.stream()
+                .map(cf -> friends.get(cf.getId().getFriendId()))
+                .filter(Objects::nonNull)
+                .map(UserResponse::from)
+                .toList();
     }
 
     // TODO (not yet built, see UserBlockEntity javadoc): if user_blocks ever gets a `scope`

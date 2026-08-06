@@ -23,6 +23,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 
 import com.chatapp.core.base.constant.FriendshipStatus;
+import com.chatapp.core.base.entity.CloseFriendEntity;
 import com.chatapp.core.base.entity.FriendshipEntity;
 import com.chatapp.core.base.entity.UserEntity;
 import com.chatapp.core.base.repository.CloseFriendRepository;
@@ -375,6 +376,83 @@ class FriendServiceImplTest {
         assertThrowsErrorCode(() -> friendService.unfriend(requesterId, addresseeId),
                 ErrorCode.FRIENDSHIP_NOT_FOUND);
         verify(friendshipRepository, never()).delete(any());
+    }
+
+    @Test
+    void listFriends_mapsAcceptedFriendships_regardlessOfDirection() {
+        UUID otherAsAddressee = UUID.randomUUID();
+        UUID otherAsRequester = UUID.randomUUID();
+        FriendshipEntity iAmRequester = new FriendshipEntity(requesterId, otherAsAddressee, "hi");
+        iAmRequester.accept();
+        FriendshipEntity iAmAddressee = new FriendshipEntity(otherAsRequester, requesterId, "hey");
+        iAmAddressee.accept();
+        when(friendshipRepository.findAllAcceptedForUser(requesterId)).thenReturn(List.of(iAmRequester, iAmAddressee));
+        when(userRepository.findAllById(any())).thenReturn(List.of(
+                withId(someUser(), otherAsAddressee), withId(someUser(), otherAsRequester)));
+
+        List<com.chatapp.core.base.UserResponse> result = friendService.listFriends(requesterId);
+
+        assertThat(result).extracting(com.chatapp.core.base.UserResponse::getId)
+                .containsExactlyInAnyOrder(otherAsAddressee, otherAsRequester);
+    }
+
+    @Test
+    void addCloseFriend_rejectsSelf() {
+        assertThrowsErrorCode(() -> friendService.addCloseFriend(requesterId, requesterId),
+                ErrorCode.SELF_CLOSE_FRIEND_NOT_ALLOWED);
+        verify(closeFriendRepository, never()).save(any());
+    }
+
+    @Test
+    void addCloseFriend_rejectsWhenNotAcceptedFriends() {
+        when(friendshipRepository.findByUnorderedPair(requesterId, addresseeId)).thenReturn(Optional.empty());
+
+        assertThrowsErrorCode(() -> friendService.addCloseFriend(requesterId, addresseeId),
+                ErrorCode.FRIENDSHIP_NOT_FOUND);
+        verify(closeFriendRepository, never()).save(any());
+    }
+
+    @Test
+    void addCloseFriend_savesRow_whenAcceptedFriends() {
+        FriendshipEntity accepted = new FriendshipEntity(requesterId, addresseeId, "hi");
+        accepted.accept();
+        when(friendshipRepository.findByUnorderedPair(requesterId, addresseeId)).thenReturn(Optional.of(accepted));
+        when(closeFriendRepository.existsById_UserIdAndId_FriendId(requesterId, addresseeId)).thenReturn(false);
+
+        friendService.addCloseFriend(requesterId, addresseeId);
+
+        verify(closeFriendRepository).save(any(CloseFriendEntity.class));
+    }
+
+    @Test
+    void addCloseFriend_isNoOp_whenAlreadyCloseFriend() {
+        FriendshipEntity accepted = new FriendshipEntity(requesterId, addresseeId, "hi");
+        accepted.accept();
+        when(friendshipRepository.findByUnorderedPair(requesterId, addresseeId)).thenReturn(Optional.of(accepted));
+        when(closeFriendRepository.existsById_UserIdAndId_FriendId(requesterId, addresseeId)).thenReturn(true);
+
+        friendService.addCloseFriend(requesterId, addresseeId);
+
+        verify(closeFriendRepository, never()).save(any());
+    }
+
+    @Test
+    void removeCloseFriend_delegatesToRepository_idempotentEvenIfNotCloseFriend() {
+        friendService.removeCloseFriend(requesterId, addresseeId);
+
+        verify(closeFriendRepository).deleteById_UserIdAndId_FriendId(requesterId, addresseeId);
+    }
+
+    @Test
+    void listCloseFriends_mapsFriendIdsToUsers() {
+        CloseFriendEntity closeFriend = new CloseFriendEntity(requesterId, addresseeId);
+        when(closeFriendRepository.findById_UserId(requesterId)).thenReturn(List.of(closeFriend));
+        when(userRepository.findAllById(any())).thenReturn(List.of(withId(someUser(), addresseeId)));
+
+        List<com.chatapp.core.base.UserResponse> result = friendService.listCloseFriends(requesterId);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getId()).isEqualTo(addresseeId);
     }
 
     /** UserEntity's id is DB-generated (no public setter) — reflection is the only way to give

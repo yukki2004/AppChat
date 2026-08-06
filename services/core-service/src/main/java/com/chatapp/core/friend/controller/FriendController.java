@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.chatapp.core.base.ApiResponse;
+import com.chatapp.core.base.UserResponse;
 import com.chatapp.core.friend.FriendService;
 import com.chatapp.core.friend.dto.request.SendFriendRequestRequest;
 import com.chatapp.core.friend.dto.response.FriendRequestResponse;
@@ -67,5 +68,29 @@ public class FriendController {
             @RequestHeader("X-User-Id") UUID currentUserId, @PathVariable UUID userId) {
         friendService.unfriend(currentUserId, userId);
         return ResponseEntity.ok(ApiResponse.ok());
+    }
+
+    @GetMapping
+    public ResponseEntity<ApiResponse<List<UserResponse>>> listFriends(@RequestHeader("X-User-Id") UUID userId) {
+        return ResponseEntity.ok(ApiResponse.ok(friendService.listFriends(userId)));
+    }
+
+    @PostMapping("/close/{userId}")
+    public ResponseEntity<ApiResponse<Void>> addCloseFriend(
+            @RequestHeader("X-User-Id") UUID currentUserId, @PathVariable UUID userId) {
+        friendService.addCloseFriend(currentUserId, userId);
+        return ResponseEntity.ok(ApiResponse.ok());
+    }
+
+    @DeleteMapping("/close/{userId}")
+    public ResponseEntity<ApiResponse<Void>> removeCloseFriend(
+            @RequestHeader("X-User-Id") UUID currentUserId, @PathVariable UUID userId) {
+        friendService.removeCloseFriend(currentUserId, userId);
+        return ResponseEntity.ok(ApiResponse.ok());
+    }
+
+    @GetMapping("/close")
+    public ResponseEntity<ApiResponse<List<UserResponse>>> listCloseFriends(@RequestHeader("X-User-Id") UUID userId) {
+        return ResponseEntity.ok(ApiResponse.ok(friendService.listCloseFriends(userId)));
     }
 }

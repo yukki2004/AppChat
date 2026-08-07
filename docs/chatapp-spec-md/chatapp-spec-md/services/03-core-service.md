@@ -517,6 +517,33 @@ lọc `OR` trực tiếp trên 2 cột đó, không dùng được unique index 
 `GET /friends/requests/incoming`, `GET /friends/requests/outgoing` — liệt kê lời mời đang
 PENDING theo 2 chiều nhận/gửi.
 
+**Gửi lời mời kết bạn qua QR** (mở rộng #19, không phải flow riêng): `GET /friends/qr-token`
+cấp 1 token ngẫu nhiên (UUID v4) đại diện cho user gọi, lưu Redis
+`cache:friend_qr_token:{token} → user_id`, TTL 5 phút (`RedisKeys.FRIEND_QR_TOKEN_TTL_SECONDS`),
+KHÔNG single-use — cùng 1 token vẫn resolve được cho tới khi hết TTL, vì QR đứng yên trên màn
+hình cho nhiều người quét lần lượt, khác OTP dùng 1 lần. FE tự quyết định encode gì vào ảnh QR
+(token trần, hay 1 URL chứa token) — Core Service không quan tâm định dạng QR, chỉ cấp/resolve
+token. `POST /friends/requests/qr` nhận `{qrToken, message}`, resolve token ra `addressee_id`
+rồi chạy lại NGUYÊN luồng #19 (`sendRequest`) — không có guard/check riêng cho nhánh QR, token
+chỉ là cách khác để cung cấp `addresseeId`. Token invalid/hết hạn → `FRIEND_QR_TOKEN_INVALID`
+(404), không phân biệt "chưa từng tồn tại" hay "đã hết hạn" trong message trả về.
+
+Mỗi user chỉ có đúng 1 token "active" tại 1 thời điểm, track bằng con trỏ Redis riêng
+`cache:friend_qr_active:{user_id} → token`:
+- **Revoke sớm**: `DELETE /friends/qr-token` — xoá token active ngay, không cần đợi hết TTL
+  5 phút (idempotent, gọi khi không có token active nào cũng trả 200 bình thường).
+- **Tạo token mới tự huỷ token cũ**: gọi lại `GET /friends/qr-token` khi đã có token active thì
+  token cũ bị xoá ngay (qua con trỏ trên) trước khi token mới được tạo — ảnh QR cũ (chụp màn
+  hình, tab cũ còn mở) chết ngay, không phải đợi TTL.
+- **Giới hạn số lần dùng** (defense-in-depth, KHÔNG phải single-use): mỗi token tối đa
+  `FriendQrTokenService.MAX_USES` = 30 lần gửi request (đếm bằng Redis `INCR` atomic trên
+  `cache:friend_qr_token_uses:{token}`, cùng TTL với token — bắt buộc atomic, không tách
+  đọc/ghi, tránh race 2 lượt quét cùng lúc đều đọc thấy count cũ và cùng vượt hạn mức). Vượt
+  hạn mức → `FRIEND_QR_TOKEN_USAGE_LIMIT_REACHED` (429), token vẫn còn hạn TTL nhưng không
+  resolve tiếp được nữa. Mục đích: chặn trường hợp QR bị lộ ra ngoài ý định ban đầu (đăng công
+  khai, forward hàng loạt) bị spam request, KHÔNG nhằm hạn chế cách dùng bình thường (show QR
+  cho vài người quét trong 1 buổi gặp mặt không bao giờ chạm ngưỡng này).
+
 **#23 Danh sách bạn bè** (`GET /friends`): trả `List<UserResponse>` thuần, KHÔNG có
 `PublicPresenceDTO` như mô tả gốc — chưa có client gRPC Presence nào trong codebase (Presence
 thuộc Realtime Gateway, không phải Core Service), ghi TODO trong code, nối khi Presence sẵn sàng.

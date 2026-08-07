@@ -1,6 +1,6 @@
 package com.chatapp.core.auth.result;
 
-import com.chatapp.core.auth.dto.response.UserResponse;
+import com.chatapp.core.base.UserResponse;
 
 /** Internal result of login — NOT serialized directly to JSON; the Controller extracts
  *  accessToken/refreshToken into Set-Cookie headers and only returns UserResponse in the body. */

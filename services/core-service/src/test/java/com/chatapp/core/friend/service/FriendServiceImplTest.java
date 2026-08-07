@@ -1,0 +1,415 @@
+package com.chatapp.core.friend.service;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+
+import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataIntegrityViolationException;
+
+import com.chatapp.core.base.constant.FriendshipStatus;
+import com.chatapp.core.base.entity.CloseFriendEntity;
+import com.chatapp.core.base.entity.FriendshipEntity;
+import com.chatapp.core.base.entity.UserEntity;
+import com.chatapp.core.base.repository.CloseFriendRepository;
+import com.chatapp.core.base.repository.FriendshipRepository;
+import com.chatapp.core.base.repository.UserBlockRepository;
+import com.chatapp.core.base.repository.UserRepository;
+import com.chatapp.core.exception.common.AppException;
+import com.chatapp.core.exception.common.ErrorCode;
+import com.chatapp.core.friend.dto.response.SendFriendRequestResponse;
+import com.chatapp.core.friend.util.FriendRequestResolver;
+import com.chatapp.core.lock.PairLockService;
+
+@ExtendWith(MockitoExtension.class)
+class FriendServiceImplTest {
+
+    @Mock
+    private UserRepository userRepository;
+    @Mock
+    private FriendshipRepository friendshipRepository;
+    @Mock
+    private UserBlockRepository userBlockRepository;
+    @Mock
+    private CloseFriendRepository closeFriendRepository;
+    @Mock
+    private PairLockService pairLockService;
+
+    private FriendServiceImpl friendService;
+
+    private final UUID requesterId = UUID.randomUUID();
+    private final UUID addresseeId = UUID.randomUUID();
+
+    @BeforeEach
+    void setUp() {
+        // userBlockRepository is left unstubbed in most tests below — Mockito defaults an
+        // unstubbed boolean-returning method to false, which is exactly "not blocked".
+        friendService = new FriendServiceImpl(
+                userRepository,
+                friendshipRepository,
+                userBlockRepository,
+                closeFriendRepository,
+                new FriendRequestResolver(friendshipRepository),
+                pairLockService);
+    }
+
+    private UserEntity someUser() {
+        return new UserEntity("bob", "bob@example.com", null, "hash", "Bob");
+    }
+
+    private void assertThrowsErrorCode(ThrowingCallable callable, ErrorCode expected) {
+        assertThatThrownBy(callable)
+                .isInstanceOf(AppException.class)
+                .extracting(ex -> ((AppException) ex).getErrorCode())
+                .isEqualTo(expected);
+    }
+
+    @Test
+    void sendRequest_rejectsSelfRequest() {
+        assertThrowsErrorCode(() -> friendService.sendRequest(requesterId, requesterId, null),
+                ErrorCode.SELF_FRIEND_REQUEST_NOT_ALLOWED);
+        verify(friendshipRepository, never()).save(any());
+    }
+
+    @Test
+    void sendRequest_rejectsWhenAddresseeMissing() {
+        when(userRepository.findByIdAndDeletedAtIsNull(requesterId)).thenReturn(Optional.of(someUser()));
+        when(userRepository.findByIdAndDeletedAtIsNull(addresseeId)).thenReturn(Optional.empty());
+
+        assertThrowsErrorCode(() -> friendService.sendRequest(requesterId, addresseeId, null),
+                ErrorCode.USER_NOT_FOUND);
+    }
+
+    @Test
+    void sendRequest_rejectsWhenRequesterMissing() {
+        // Guards a soft-deleted requester still holding an unexpired access_token.
+        when(userRepository.findByIdAndDeletedAtIsNull(requesterId)).thenReturn(Optional.empty());
+
+        assertThrowsErrorCode(() -> friendService.sendRequest(requesterId, addresseeId, null),
+                ErrorCode.REQUESTER_NOT_FOUND);
+        verify(userRepository, never()).findByIdAndDeletedAtIsNull(addresseeId);
+    }
+
+    @Test
+    void sendRequest_rejectsWhenEitherDirectionBlocked() {
+        // OR-2-chiều collapsed into 1 round-trip query now — the caller can't tell (and doesn't
+        // need to) which side actually blocked which.
+        when(userRepository.findByIdAndDeletedAtIsNull(requesterId)).thenReturn(Optional.of(someUser()));
+        when(userRepository.findByIdAndDeletedAtIsNull(addresseeId)).thenReturn(Optional.of(someUser()));
+        when(userBlockRepository.existsByBlockerIdAndBlockedIdOrBlockerIdAndBlockedId(
+                requesterId, addresseeId, addresseeId, requesterId)).thenReturn(true);
+
+        assertThrowsErrorCode(() -> friendService.sendRequest(requesterId, addresseeId, null),
+                ErrorCode.FRIEND_REQUEST_NOT_ALLOWED);
+        verify(friendshipRepository, never()).findByUnorderedPair(any(), any());
+    }
+
+    @Test
+    void sendRequest_insertsFreshPendingRow_whenNoExistingRow() {
+        when(userRepository.findByIdAndDeletedAtIsNull(requesterId)).thenReturn(Optional.of(someUser()));
+        when(userRepository.findByIdAndDeletedAtIsNull(addresseeId)).thenReturn(Optional.of(someUser()));
+        when(friendshipRepository.findByUnorderedPair(requesterId, addresseeId)).thenReturn(Optional.empty());
+
+        SendFriendRequestResponse result = friendService.sendRequest(requesterId, addresseeId, "hi");
+
+        assertThat(result.getStatus()).isEqualTo("PENDING");
+        verify(friendshipRepository).saveAndFlush(any(FriendshipEntity.class));
+    }
+
+    @Test
+    void sendRequest_autoAccepts_whenReversePendingAlreadyExists() {
+        // B already sent a PENDING request to A; A (requesterId) now sends back to B.
+        FriendshipEntity reversePending = new FriendshipEntity(addresseeId, requesterId, "hey");
+        when(userRepository.findByIdAndDeletedAtIsNull(requesterId)).thenReturn(Optional.of(someUser()));
+        when(userRepository.findByIdAndDeletedAtIsNull(addresseeId)).thenReturn(Optional.of(someUser()));
+        when(friendshipRepository.findByUnorderedPair(requesterId, addresseeId)).thenReturn(Optional.of(reversePending));
+
+        SendFriendRequestResponse result = friendService.sendRequest(requesterId, addresseeId, "hi back");
+
+        assertThat(result.getStatus()).isEqualTo("ACCEPTED");
+        assertThat(reversePending.getStatus()).isEqualTo(FriendshipStatus.ACCEPTED);
+        verify(friendshipRepository).save(reversePending);
+    }
+
+    @Test
+    void sendRequest_rejectsDuplicate_whenSameDirectionAlreadyPending() {
+        FriendshipEntity samePending = new FriendshipEntity(requesterId, addresseeId, "hi");
+        when(userRepository.findByIdAndDeletedAtIsNull(requesterId)).thenReturn(Optional.of(someUser()));
+        when(userRepository.findByIdAndDeletedAtIsNull(addresseeId)).thenReturn(Optional.of(someUser()));
+        when(friendshipRepository.findByUnorderedPair(requesterId, addresseeId)).thenReturn(Optional.of(samePending));
+
+        assertThrowsErrorCode(() -> friendService.sendRequest(requesterId, addresseeId, "hi again"),
+                ErrorCode.FRIEND_REQUEST_ALREADY_SENT);
+    }
+
+    @Test
+    void sendRequest_rejectsWhenAlreadyFriends() {
+        FriendshipEntity accepted = new FriendshipEntity(requesterId, addresseeId, "hi");
+        accepted.accept();
+        when(userRepository.findByIdAndDeletedAtIsNull(requesterId)).thenReturn(Optional.of(someUser()));
+        when(userRepository.findByIdAndDeletedAtIsNull(addresseeId)).thenReturn(Optional.of(someUser()));
+        when(friendshipRepository.findByUnorderedPair(requesterId, addresseeId)).thenReturn(Optional.of(accepted));
+
+        assertThrowsErrorCode(() -> friendService.sendRequest(requesterId, addresseeId, null),
+                ErrorCode.ALREADY_FRIENDS);
+    }
+
+    @Test
+    void sendRequest_reusesRow_whenPreviouslyRejected() {
+        FriendshipEntity rejected = new FriendshipEntity(addresseeId, requesterId, "old message");
+        rejected.reject();
+        when(userRepository.findByIdAndDeletedAtIsNull(requesterId)).thenReturn(Optional.of(someUser()));
+        when(userRepository.findByIdAndDeletedAtIsNull(addresseeId)).thenReturn(Optional.of(someUser()));
+        when(friendshipRepository.findByUnorderedPair(requesterId, addresseeId)).thenReturn(Optional.of(rejected));
+
+        SendFriendRequestResponse result = friendService.sendRequest(requesterId, addresseeId, "new try");
+
+        assertThat(result.getStatus()).isEqualTo("PENDING");
+        assertThat(rejected.getStatus()).isEqualTo(FriendshipStatus.PENDING);
+        assertThat(rejected.getRequesterId()).isEqualTo(requesterId);
+        assertThat(rejected.getAddresseeId()).isEqualTo(addresseeId);
+        verify(friendshipRepository).save(rejected);
+    }
+
+    @Test
+    void sendRequest_resolvesRaceCondition_asAutoAccept() {
+        // Both sides passed the pre-check with no existing row, then this insert lost the race
+        // to the DB unique index — the winner's row (reverse PENDING) is now visible on refetch.
+        FriendshipEntity winner = new FriendshipEntity(addresseeId, requesterId, "raced in first");
+        when(userRepository.findByIdAndDeletedAtIsNull(requesterId)).thenReturn(Optional.of(someUser()));
+        when(userRepository.findByIdAndDeletedAtIsNull(addresseeId)).thenReturn(Optional.of(someUser()));
+        when(friendshipRepository.findByUnorderedPair(requesterId, addresseeId))
+                .thenReturn(Optional.empty())
+                .thenReturn(Optional.of(winner));
+        when(friendshipRepository.saveAndFlush(any(FriendshipEntity.class)))
+                .thenThrow(new DataIntegrityViolationException("duplicate key"));
+
+        SendFriendRequestResponse result = friendService.sendRequest(requesterId, addresseeId, "hi");
+
+        assertThat(result.getStatus()).isEqualTo("ACCEPTED");
+        assertThat(winner.getStatus()).isEqualTo(FriendshipStatus.ACCEPTED);
+    }
+
+    @Test
+    void accept_marksFriendshipAccepted_whenCurrentUserIsAddressee() {
+        // addresseeId sent it, requesterId (current user) is accepting.
+        FriendshipEntity pending = new FriendshipEntity(addresseeId, requesterId, "hi");
+        when(friendshipRepository.findByRequesterIdAndAddresseeIdAndStatus(addresseeId, requesterId, FriendshipStatus.PENDING))
+                .thenReturn(Optional.of(pending));
+
+        friendService.accept(requesterId, addresseeId);
+
+        assertThat(pending.getStatus()).isEqualTo(FriendshipStatus.ACCEPTED);
+        verify(friendshipRepository).save(pending);
+    }
+
+    @Test
+    void accept_throwsNotFound_whenCurrentUserIsRequesterNotAddressee() {
+        // requesterId sent it themselves — they cannot "accept" their own outgoing request.
+        // (otherUserId=addresseeId as requester, currentUserId=requesterId as addressee) simply
+        // isn't a row that exists, so the direct lookup correctly comes back empty.
+        when(friendshipRepository.findByRequesterIdAndAddresseeIdAndStatus(addresseeId, requesterId, FriendshipStatus.PENDING))
+                .thenReturn(Optional.empty());
+
+        assertThrowsErrorCode(() -> friendService.accept(requesterId, addresseeId),
+                ErrorCode.FRIEND_REQUEST_NOT_FOUND);
+        verify(friendshipRepository, never()).save(any());
+    }
+
+    @Test
+    void accept_throwsNotFound_whenNoRowExists() {
+        when(friendshipRepository.findByRequesterIdAndAddresseeIdAndStatus(addresseeId, requesterId, FriendshipStatus.PENDING))
+                .thenReturn(Optional.empty());
+
+        assertThrowsErrorCode(() -> friendService.accept(requesterId, addresseeId),
+                ErrorCode.FRIEND_REQUEST_NOT_FOUND);
+    }
+
+    @Test
+    void listIncomingPending_mapsRequesterAsOtherUser() {
+        FriendshipEntity pending = new FriendshipEntity(addresseeId, requesterId, "hi");
+        UserEntity other = withId(someUser(), addresseeId);
+        when(friendshipRepository.findIncomingPending(requesterId)).thenReturn(List.of(pending));
+        when(userRepository.findAllById(any())).thenReturn(List.of(other));
+
+        List<com.chatapp.core.friend.dto.response.FriendRequestResponse> result =
+                friendService.listIncomingPending(requesterId);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getMessage()).isEqualTo("hi");
+    }
+
+    @Test
+    void cancelOrReject_cancels_whenCurrentUserIsRequester() {
+        FriendshipEntity pending = new FriendshipEntity(requesterId, addresseeId, "hi");
+        when(friendshipRepository.findByUnorderedPair(requesterId, addresseeId)).thenReturn(Optional.of(pending));
+
+        friendService.cancelOrReject(requesterId, addresseeId);
+
+        assertThat(pending.getStatus()).isEqualTo(FriendshipStatus.CANCELLED);
+        verify(friendshipRepository).save(pending);
+    }
+
+    @Test
+    void cancelOrReject_rejects_whenCurrentUserIsAddressee() {
+        FriendshipEntity pending = new FriendshipEntity(requesterId, addresseeId, "hi");
+        when(friendshipRepository.findByUnorderedPair(addresseeId, requesterId)).thenReturn(Optional.of(pending));
+
+        friendService.cancelOrReject(addresseeId, requesterId);
+
+        assertThat(pending.getStatus()).isEqualTo(FriendshipStatus.REJECTED);
+        verify(friendshipRepository).save(pending);
+    }
+
+    @Test
+    void cancelOrReject_throwsNotFound_whenNoPendingRowExists() {
+        when(friendshipRepository.findByUnorderedPair(requesterId, addresseeId)).thenReturn(Optional.empty());
+
+        assertThrowsErrorCode(() -> friendService.cancelOrReject(requesterId, addresseeId),
+                ErrorCode.FRIEND_REQUEST_NOT_FOUND);
+    }
+
+    @Test
+    void cancelOrReject_throwsNotFound_whenRowIsNotPending() {
+        FriendshipEntity accepted = new FriendshipEntity(requesterId, addresseeId, "hi");
+        accepted.accept();
+        when(friendshipRepository.findByUnorderedPair(requesterId, addresseeId)).thenReturn(Optional.of(accepted));
+
+        assertThrowsErrorCode(() -> friendService.cancelOrReject(requesterId, addresseeId),
+                ErrorCode.FRIEND_REQUEST_NOT_FOUND);
+        verify(friendshipRepository, never()).save(any());
+    }
+
+    @Test
+    void unfriend_deletesAcceptedFriendship() {
+        FriendshipEntity accepted = new FriendshipEntity(requesterId, addresseeId, "hi");
+        accepted.accept();
+        when(friendshipRepository.findByUnorderedPair(requesterId, addresseeId)).thenReturn(Optional.of(accepted));
+
+        friendService.unfriend(requesterId, addresseeId);
+
+        verify(friendshipRepository).delete(accepted);
+        verify(closeFriendRepository).deleteById_UserIdAndId_FriendId(requesterId, addresseeId);
+        verify(closeFriendRepository).deleteById_UserIdAndId_FriendId(addresseeId, requesterId);
+    }
+
+    @Test
+    void unfriend_throwsNotFound_whenNoRowExists() {
+        when(friendshipRepository.findByUnorderedPair(requesterId, addresseeId)).thenReturn(Optional.empty());
+
+        assertThrowsErrorCode(() -> friendService.unfriend(requesterId, addresseeId),
+                ErrorCode.FRIENDSHIP_NOT_FOUND);
+    }
+
+    @Test
+    void unfriend_throwsNotFound_whenRowIsNotAccepted() {
+        FriendshipEntity pending = new FriendshipEntity(requesterId, addresseeId, "hi");
+        when(friendshipRepository.findByUnorderedPair(requesterId, addresseeId)).thenReturn(Optional.of(pending));
+
+        assertThrowsErrorCode(() -> friendService.unfriend(requesterId, addresseeId),
+                ErrorCode.FRIENDSHIP_NOT_FOUND);
+        verify(friendshipRepository, never()).delete(any());
+    }
+
+    @Test
+    void listFriends_mapsAcceptedFriendships_regardlessOfDirection() {
+        UUID otherAsAddressee = UUID.randomUUID();
+        UUID otherAsRequester = UUID.randomUUID();
+        FriendshipEntity iAmRequester = new FriendshipEntity(requesterId, otherAsAddressee, "hi");
+        iAmRequester.accept();
+        FriendshipEntity iAmAddressee = new FriendshipEntity(otherAsRequester, requesterId, "hey");
+        iAmAddressee.accept();
+        when(friendshipRepository.findAllAcceptedForUser(requesterId)).thenReturn(List.of(iAmRequester, iAmAddressee));
+        when(userRepository.findAllById(any())).thenReturn(List.of(
+                withId(someUser(), otherAsAddressee), withId(someUser(), otherAsRequester)));
+
+        List<com.chatapp.core.base.UserResponse> result = friendService.listFriends(requesterId);
+
+        assertThat(result).extracting(com.chatapp.core.base.UserResponse::getId)
+                .containsExactlyInAnyOrder(otherAsAddressee, otherAsRequester);
+    }
+
+    @Test
+    void addCloseFriend_rejectsSelf() {
+        assertThrowsErrorCode(() -> friendService.addCloseFriend(requesterId, requesterId),
+                ErrorCode.SELF_CLOSE_FRIEND_NOT_ALLOWED);
+        verify(closeFriendRepository, never()).save(any());
+    }
+
+    @Test
+    void addCloseFriend_rejectsWhenNotAcceptedFriends() {
+        when(friendshipRepository.findByUnorderedPair(requesterId, addresseeId)).thenReturn(Optional.empty());
+
+        assertThrowsErrorCode(() -> friendService.addCloseFriend(requesterId, addresseeId),
+                ErrorCode.FRIENDSHIP_NOT_FOUND);
+        verify(closeFriendRepository, never()).save(any());
+    }
+
+    @Test
+    void addCloseFriend_savesRow_whenAcceptedFriends() {
+        FriendshipEntity accepted = new FriendshipEntity(requesterId, addresseeId, "hi");
+        accepted.accept();
+        when(friendshipRepository.findByUnorderedPair(requesterId, addresseeId)).thenReturn(Optional.of(accepted));
+        when(closeFriendRepository.existsById_UserIdAndId_FriendId(requesterId, addresseeId)).thenReturn(false);
+
+        friendService.addCloseFriend(requesterId, addresseeId);
+
+        verify(closeFriendRepository).save(any(CloseFriendEntity.class));
+    }
+
+    @Test
+    void addCloseFriend_isNoOp_whenAlreadyCloseFriend() {
+        FriendshipEntity accepted = new FriendshipEntity(requesterId, addresseeId, "hi");
+        accepted.accept();
+        when(friendshipRepository.findByUnorderedPair(requesterId, addresseeId)).thenReturn(Optional.of(accepted));
+        when(closeFriendRepository.existsById_UserIdAndId_FriendId(requesterId, addresseeId)).thenReturn(true);
+
+        friendService.addCloseFriend(requesterId, addresseeId);
+
+        verify(closeFriendRepository, never()).save(any());
+    }
+
+    @Test
+    void removeCloseFriend_delegatesToRepository_idempotentEvenIfNotCloseFriend() {
+        friendService.removeCloseFriend(requesterId, addresseeId);
+
+        verify(closeFriendRepository).deleteById_UserIdAndId_FriendId(requesterId, addresseeId);
+    }
+
+    @Test
+    void listCloseFriends_mapsFriendIdsToUsers() {
+        CloseFriendEntity closeFriend = new CloseFriendEntity(requesterId, addresseeId);
+        when(closeFriendRepository.findById_UserId(requesterId)).thenReturn(List.of(closeFriend));
+        when(userRepository.findAllById(any())).thenReturn(List.of(withId(someUser(), addresseeId)));
+
+        List<com.chatapp.core.base.UserResponse> result = friendService.listCloseFriends(requesterId);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getId()).isEqualTo(addresseeId);
+    }
+
+    /** UserEntity's id is DB-generated (no public setter) — reflection is the only way to give
+     *  a test double a specific id without standing up a real persistence context. */
+    private UserEntity withId(UserEntity user, UUID id) {
+        try {
+            var field = UserEntity.class.getDeclaredField("id");
+            field.setAccessible(true);
+            field.set(user, id);
+            return user;
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+}

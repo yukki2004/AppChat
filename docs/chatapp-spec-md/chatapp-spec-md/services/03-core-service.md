@@ -451,15 +451,78 @@ thụ 1 mã (xem cơ chế `consume` ở trên) → phát access/refresh token t
 | **id** | UUID | NO | gen_random_uuid() | PK |
 | **requester_id** | UUID FK→users | NO | – | Người gửi lời mời |
 | **addressee_id** | UUID FK→users | NO | – | Người nhận |
-| status | VARCHAR(20) | NO | PENDING | Enum FriendshipStatus |
+| status | SMALLINT | NO | 1 | Enum FriendshipStatus — lưu số cố định gán tay (`PENDING=1, ACCEPTED=2, REJECTED=3, CANCELLED=4`), KHÔNG lưu chuỗi, theo `skills/naming-conventions.md` #3 (đây là enum MỚI lưu DB, không phải trường hợp cũ được miễn áp dụng) — cùng khuôn `otp_codes.purpose`/`OtpPurposeConverter` |
 | message | VARCHAR(200) | YES | NULL | Lời nhắn kèm lời mời |
 | created_at | TIMESTAMPTZ | NO | now() | UTC |
 | updated_at | TIMESTAMPTZ | NO | now() | UTC |
 
 **Ràng buộc bắt buộc:** UNIQUE index trên cặp không phân biệt thứ tự
-`(LEAST(requester_id, addressee_id), GREATEST(requester_id, addressee_id))` — chống race
-condition khi A và B cùng lúc gửi lời mời kết bạn cho nhau, tạo ra 2 dòng PENDING song song
-(A→B và B→A) thay vì phát hiện lời mời ngược chiều đã tồn tại và tự động chuyển thành ACCEPTED.
+`(LEAST(requester_id, addressee_id), GREATEST(requester_id, addressee_id))` — chỉ tồn tại đúng 1
+row cho mỗi cặp user, bất kể ai từng là requester/addressee. Hệ quả cho tầng ứng dụng
+(`FriendServiceImpl.sendRequest`):
+- A và B cùng lúc gửi lời mời cho nhau (race condition) → 1 trong 2 insert bị unique index chặn
+  ở tầng DB (`DataIntegrityViolationException`) dù tầng code đã check "chưa có row" trước đó
+  (TOCTOU) — bắt exception này, fetch lại row, xử lý y như case dưới. Lưu ý implementation:
+  insert nhánh này PHẢI dùng `saveAndFlush()` chứ không phải `save()` — `id` là UUID sinh trong
+  bộ nhớ (Hibernate không cần round-trip DB để có ID) nên `save()` hoãn INSERT thật tới lúc
+  transaction commit, bắt exception ở `try/catch` sẽ không kích hoạt nếu không ép flush ngay.
+
+**Index bổ sung** (ngoài unique index trên): `(requester_id, addressee_id)` thường (không unique)
+— phục vụ riêng cho query `findByUnorderedPair` (chạy ở MỌI lần gửi/accept lời mời) vì query này
+lọc `OR` trực tiếp trên 2 cột đó, không dùng được unique index (index đó dùng hàm
+`LEAST`/`GREATEST`, chỉ phục vụ được check constraint lúc insert).
+- B đã gửi PENDING cho A trước, A gửi lại cho B → KHÔNG insert row mới, update ngược lại chính
+  row đó thành `ACCEPTED` (auto-accept).
+- Row cũ đang `REJECTED`/`CANCELLED` (bất kể chiều nào), 1 trong 2 người gửi lại → **reuse lại
+  chính row đó**, đổi `requester_id`/`addressee_id` theo chiều mới, đưa status về `PENDING`
+  (không insert row mới — sẽ vi phạm unique index).
+
+**Endpoint bổ sung** (không có số # riêng trong bảng 3.1 nhưng cần để #20/#21 dùng được):
+`GET /friends/requests/incoming`, `GET /friends/requests/outgoing` — liệt kê lời mời đang
+PENDING theo 2 chiều nhận/gửi.
+
+**#23 Danh sách bạn bè** (`GET /friends`): trả `List<UserResponse>` thuần, KHÔNG có
+`PublicPresenceDTO` như mô tả gốc — chưa có client gRPC Presence nào trong codebase (Presence
+thuộc Realtime Gateway, không phải Core Service), ghi TODO trong code, nối khi Presence sẵn sàng.
+
+**#26 Danh sách bạn thân (Close Friends)**: 1 chiều (A đánh dấu B là bạn thân không có nghĩa B
+đánh dấu A) — đúng bản chất product feature, không cascade ngược. Muốn thêm ai vào close friends
+thì 2 người phải đang ACCEPTED trong `friendships` trước (lỗi `FRIENDSHIP_NOT_FOUND` nếu chưa),
+add/remove đều idempotent. Route: `POST /friends/close/{userId}`, `DELETE /friends/close/{userId}`,
+`GET /friends/close`.
+
+**Block là tường chắn toàn diện** (#24): chặn ai → xoá luôn row `friendships` giữa 2 người (bất
+kể status nào) + xoá cả 2 chiều trong `close_friends`. Check block ở #19 (gửi lời mời) là OR
+2 chiều (A chặn B **hoặc** B chặn A đều chặn được), trả lỗi chung `FRIEND_REQUEST_NOT_ALLOWED`,
+không lộ ai là người chặn. Unfriend (#22) cũng cascade xoá `close_friends` 2 chiều, cùng logic.
+Cả block và unblock đều idempotent — gọi lại khi đã ở đúng trạng thái không báo lỗi, trả 200.
+Bảng `close_friends` được tạo migration ngay từ batch này (#24/#25) dù các endpoint quản lý close
+friends (#26) chưa code — vì block/unfriend cần cascade xoá vào bảng đó trước khi #26 tồn tại.
+
+**TODO — 2 loại block chưa được lên kế hoạch cụ thể (đã trao đổi, chưa chốt lịch code):** hiện
+tại `user_blocks` chỉ có đúng 1 loại "full block" (như mô tả trên: xoá friendship/close-friend,
+chặn friend request, và về sau — khi messaging/call/social-service enforce — sẽ ẩn cả nhắn tin/
+gọi/profile/tìm kiếm). Có bàn tới 1 loại thứ 2 hẹp hơn — "chặn tin nhắn/gọi" — vẫn giữ bạn bè,
+vẫn thấy profile nhau, chỉ mute nhắn tin + gọi, độc lập với full block. Nếu triển khai:
+- Thêm cột `scope SMALLINT NOT NULL DEFAULT 1` vào `user_blocks` (`FULL=1`,
+  `MESSAGE_CALL_ONLY=2`, theo `skills/naming-conventions.md` #3), không tạo bảng riêng.
+- Cascade xoá `friendships`/`close_friends` chỉ áp dụng cho scope `FULL`.
+- Check block ở #19 (chặn gửi friend request) chỉ tính scope `FULL`.
+- Core Service vẫn là nguồn sự thật duy nhất cho CẢ 2 scope (không tách data qua messaging-
+  service/call-service dù họ là bên enforce — giống lý do `CheckFriendship` đặt ở Core Service
+  từ đầu: đây là 1 quan hệ user-user, Core Service sở hữu MỌI quan hệ user-user).
+- Cần thêm gRPC `CheckBlock(actorId, targetId, action)` ở Core Service, trả `blocked: boolean`
+  theo action (`SEND_MESSAGE`/`CALL` → chặn nếu có row `FULL` HOẶC `MESSAGE_CALL_ONLY`;
+  `SEND_FRIEND_REQUEST`/`VIEW_PROFILE` → chỉ chặn nếu row là `FULL`). Messaging Service/Call
+  Service phải tự gọi gRPC này trước khi cho gửi tin/bắt đầu gọi — Core Service không chủ động
+  can thiệp vào luồng của service khác.
+
+**#27 Xem profile người khác** (`GET /users/{userId}`, domain mới `profile/`): trả
+`USER_NOT_FOUND` (404) cả 2 trường hợp — user không tồn tại VÀ 1 trong 2 người chặn nhau (OR
+2 chiều) — dùng CHUNG 1 error code để người bị chặn không phân biệt được "bị chặn" với "không
+tồn tại". Check `privacy_settings.who_can_see_profile` (#16) BỎ QUA — domain Privacy chưa code,
+mọi profile hiện public hoàn toàn với viewer không bị chặn, ghi TODO trong code, nối khi #16
+xong (cùng lý do đã bỏ qua `who_can_add_friend` ở #19).
 
 ### **ð user_blocks  [PostgreSQL]**
 
@@ -471,6 +534,9 @@ condition khi A và B cùng lúc gửi lời mời kết bạn cho nhau, tạo r
 | **blocked_id** | UUID FK→users | NO | – | Người bị chặn |
 | reason | VARCHAR(100) | YES | NULL | Lý do (tuỳ chọn) |
 | created_at | TIMESTAMPTZ | NO | now() | UTC |
+
+**Endpoint bổ sung** (không có số # riêng trong bảng 3.1 nhưng cần cho UI "danh sách đã chặn"):
+`GET /blocks`.
 
 ### **ð close_friends  [PostgreSQL]**
 
@@ -630,7 +696,7 @@ identity-service/
 | **7** | **Bật/Tắt chế độ duyệt** | Admin/Owner toggle require_approval. |
 | **8** | **Duyệt thành viên** | Admin xem danh sách group_join_requests, approve/reject từng người hoặc bulk. |
 | **9** | **Thêm thành viên trực tiếp** | Member thêm bạn bè (nếu tắt duyệt). Admin thêm bất kỳ. TRƯỚC KHI add phải check `who_can_add_to_group` của người được thêm (gRPC `GetPrivacySettings`): EVERYONE/FRIENDS_ONLY → add thẳng như bình thường (vẫn phải thoả điều kiện quan hệ tương ứng); NOBODY → không add thẳng được, tạo `group_invite_pending` (trạng thái chờ người đó tự xác nhận muốn vào) thay vì thêm ngay, publish `group.invite_pending` để Notification báo cho người được mời. |
-| **9b** | **Giới hạn chống spam** | Rate limit số lời mời kết bạn gửi đi / ngày (gợi ý 50/ngày) và số nhóm tạo mới / ngày per user (gợi ý 10/ngày) — Redis `INCR` + `EXPIRE 86400` theo key `cache:rate_limit:friend_request:{user_id}` / `cache:rate_limit:group_create:{user_id}`, vượt ngưỡng trả lỗi `RATE_LIMIT_EXCEEDED`. Bị B từ chối lời mời kết bạn → set `cache:friend_request_cooldown:{requester_id}:{addressee_id}` TTL 24h, A không được gửi lại cho đúng B trong thời gian này — chống harassment lặp lại. |
+| **9b** | **Giới hạn chống spam (tạo nhóm)** | Rate limit số nhóm tạo mới / ngày per user (gợi ý 10/ngày) — Redis `INCR` + `EXPIRE 86400` theo key `cache:rate_limit:group_create:{user_id}`, vượt ngưỡng trả lỗi `RATE_LIMIT_EXCEEDED`. (Rate limit + cooldown cho friend request đã bị bỏ hẳn — quyết định: không giới hạn số lời mời kết bạn/ngày, không cooldown sau khi bị từ chối.) |
 | **10** | **Xoá thành viên** | Admin/Owner kick member. Publish event group.member_removed. |
 | **11** | **Phong Admin** | Owner set role=ADMIN cho member. |
 | **12** | **Thu hồi Admin** | Owner set role=MEMBER. |

@@ -22,6 +22,7 @@ import com.chatapp.core.base.repository.UserRepository;
 import com.chatapp.core.exception.common.AppException;
 import com.chatapp.core.exception.common.ErrorCode;
 import com.chatapp.core.friend.FriendService;
+import com.chatapp.core.friend.dto.response.FriendQrTokenResponse;
 import com.chatapp.core.friend.dto.response.FriendRequestResponse;
 import com.chatapp.core.friend.dto.response.SendFriendRequestResponse;
 import com.chatapp.core.friend.util.FriendRequestResolver;
@@ -50,6 +51,7 @@ public class FriendServiceImpl implements FriendService {
     private final CloseFriendRepository closeFriendRepository;
     private final FriendRequestResolver friendRequestResolver;
     private final PairLockService pairLockService;
+    private final FriendQrTokenService friendQrTokenService;
 
     @Override
     @Transactional
@@ -83,6 +85,26 @@ public class FriendServiceImpl implements FriendService {
         // friend.accepted instead — same TODO reasoning as FriendServiceImpl.accept().
 
         return friendRequestResolver.resolve(requesterId, addresseeId, message);
+    }
+
+    @Override
+    public FriendQrTokenResponse createQrToken(UUID userId) {
+        FriendQrTokenService.Result result = friendQrTokenService.create(userId);
+        return new FriendQrTokenResponse(result.token(), result.expiresAt());
+    }
+
+    @Override
+    @Transactional
+    public SendFriendRequestResponse sendRequestByQrToken(UUID requesterId, String qrToken, String message) {
+        UUID addresseeId = friendQrTokenService.resolve(qrToken)
+                .orElseThrow(() -> new AppException(ErrorCode.FRIEND_QR_TOKEN_INVALID));
+        friendQrTokenService.recordUse(qrToken);
+        return sendRequest(requesterId, addresseeId, message);
+    }
+
+    @Override
+    public void revokeQrToken(UUID userId) {
+        friendQrTokenService.revoke(userId);
     }
 
     @Override

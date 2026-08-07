@@ -29,6 +29,7 @@ import com.chatapp.core.base.repository.UserBlockRepository;
 import com.chatapp.core.base.repository.UserRepository;
 import com.chatapp.core.exception.common.AppException;
 import com.chatapp.core.exception.common.ErrorCode;
+import com.chatapp.core.friend.dto.response.FriendQrTokenResponse;
 import com.chatapp.core.friend.dto.response.SendFriendRequestResponse;
 import com.chatapp.core.friend.util.FriendRequestResolver;
 import com.chatapp.core.lock.PairLockService;
@@ -46,6 +47,8 @@ class FriendServiceImplTest {
     private CloseFriendRepository closeFriendRepository;
     @Mock
     private PairLockService pairLockService;
+    @Mock
+    private FriendQrTokenService friendQrTokenService;
 
     private FriendServiceImpl friendService;
 
@@ -62,7 +65,8 @@ class FriendServiceImplTest {
                 userBlockRepository,
                 closeFriendRepository,
                 new FriendRequestResolver(friendshipRepository),
-                pairLockService);
+                pairLockService,
+                friendQrTokenService);
     }
 
     private UserEntity someUser() {
@@ -200,6 +204,61 @@ class FriendServiceImplTest {
 
         assertThat(result.getStatus()).isEqualTo("ACCEPTED");
         assertThat(winner.getStatus()).isEqualTo(FriendshipStatus.ACCEPTED);
+    }
+
+    @Test
+    void createQrToken_delegatesToFriendQrTokenService() {
+        var serviceResult = new FriendQrTokenService.Result("tok-1", java.time.Instant.now().plusSeconds(300));
+        when(friendQrTokenService.create(requesterId)).thenReturn(serviceResult);
+
+        FriendQrTokenResponse response = friendService.createQrToken(requesterId);
+
+        assertThat(response.token()).isEqualTo("tok-1");
+        assertThat(response.expiresAt()).isEqualTo(serviceResult.expiresAt());
+    }
+
+    @Test
+    void sendRequestByQrToken_throwsInvalid_whenTokenNotResolvable() {
+        when(friendQrTokenService.resolve("bad-token")).thenReturn(Optional.empty());
+
+        assertThrowsErrorCode(() -> friendService.sendRequestByQrToken(requesterId, "bad-token", "hi"),
+                ErrorCode.FRIEND_QR_TOKEN_INVALID);
+        verify(friendQrTokenService, never()).recordUse(any());
+        verify(friendshipRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void sendRequestByQrToken_recordsUse_thenRunsSameFlowAsSendRequest() {
+        // Resolves to addresseeId, then must go through the exact same guard checks as a plain
+        // sendRequest — reusing sendRequest_insertsFreshPendingRow_whenNoExistingRow's setup.
+        when(friendQrTokenService.resolve("good-token")).thenReturn(Optional.of(addresseeId));
+        when(userRepository.findByIdAndDeletedAtIsNull(requesterId)).thenReturn(Optional.of(someUser()));
+        when(userRepository.findByIdAndDeletedAtIsNull(addresseeId)).thenReturn(Optional.of(someUser()));
+        when(friendshipRepository.findByUnorderedPair(requesterId, addresseeId)).thenReturn(Optional.empty());
+
+        SendFriendRequestResponse result = friendService.sendRequestByQrToken(requesterId, "good-token", "hi via qr");
+
+        assertThat(result.getStatus()).isEqualTo("PENDING");
+        verify(friendQrTokenService).recordUse("good-token");
+        verify(friendshipRepository).saveAndFlush(any(FriendshipEntity.class));
+    }
+
+    @Test
+    void sendRequestByQrToken_propagatesUsageLimitError_beforeRunningSendRequestChecks() {
+        when(friendQrTokenService.resolve("exhausted-token")).thenReturn(Optional.of(addresseeId));
+        org.mockito.Mockito.doThrow(new AppException(ErrorCode.FRIEND_QR_TOKEN_USAGE_LIMIT_REACHED))
+                .when(friendQrTokenService).recordUse("exhausted-token");
+
+        assertThrowsErrorCode(() -> friendService.sendRequestByQrToken(requesterId, "exhausted-token", "hi"),
+                ErrorCode.FRIEND_QR_TOKEN_USAGE_LIMIT_REACHED);
+        verify(userRepository, never()).findByIdAndDeletedAtIsNull(any());
+    }
+
+    @Test
+    void revokeQrToken_delegatesToFriendQrTokenService() {
+        friendService.revokeQrToken(requesterId);
+
+        verify(friendQrTokenService).revoke(requesterId);
     }
 
     @Test

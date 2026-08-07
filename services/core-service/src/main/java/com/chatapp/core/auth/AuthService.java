@@ -19,6 +19,8 @@ public interface AuthService {
 
     AuthResult verifyTwoFactor(String preAuthToken, String code, String ipAddress, String userAgent);
 
+    AuthResult refreshToken(String refreshToken, String ipAddress, String userAgent);
+
     void logout(String refreshToken, String accessToken, String ipAddress, String userAgent);
 
     void logoutSession(UUID userId, UUID sessionId, String ipAddress, String userAgent);

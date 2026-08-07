@@ -112,6 +112,17 @@ public class AuthController {
                 .body(ApiResponse.ok(result.user()));
     }
 
+    @PostMapping("/auth/refresh")
+    public ResponseEntity<ApiResponse<UserResponse>> refresh(
+            @CookieValue(name = "refresh_token", required = false) String refreshToken,
+            @RequestHeader(value = "User-Agent", required = false) String userAgent,
+            @RequestHeader(value = "X-Client-IP", required = false) String clientIp) {
+        AuthResult result = authService.refreshToken(refreshToken, clientIp, userAgent);
+        return ResponseEntity.ok()
+                .header(HttpHeaders.SET_COOKIE, buildAccessRefreshCookies(result))
+                .body(ApiResponse.ok(result.user()));
+    }
+
     @PostMapping("/auth/logout")
     public ResponseEntity<ApiResponse<Void>> logout(
             @CookieValue(name = "refresh_token", required = false) String refreshToken,

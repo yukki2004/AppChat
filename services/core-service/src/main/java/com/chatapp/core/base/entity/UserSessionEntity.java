@@ -74,8 +74,17 @@ public class UserSessionEntity {
 
     public UserSessionEntity(String tokenHash, UUID userId, String ipAddress, String userAgent,
                               String loginCountry, String loginCity, Instant expiresAt) {
+        this(tokenHash, userId, null, null, null, ipAddress, userAgent, loginCountry, loginCity, expiresAt);
+    }
+
+    public UserSessionEntity(String tokenHash, UUID userId, String deviceId, String deviceName, String platform,
+                              String ipAddress, String userAgent, String loginCountry, String loginCity,
+                              Instant expiresAt) {
         this.tokenHash = tokenHash;
         this.userId = userId;
+        this.deviceId = deviceId;
+        this.deviceName = deviceName;
+        this.platform = platform;
         this.ipAddress = ipAddress;
         this.userAgent = userAgent;
         this.loginCountry = loginCountry;

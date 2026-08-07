@@ -106,8 +106,11 @@ Request bất kỳ → 401 { error_code: "TOKEN_EXPIRED" }
    1. Tra refresh_token trong Redis/DB — không tồn tại hoặc revoked_at != NULL → 401, buộc
       đăng nhập lại
    2. Còn hợp lệ → phát access_token MỚI (jti mới) + xoay vòng refresh_token MỚI (rotation):
-      vô hiệu hoá refresh_token cũ, tạo refresh_token mới cùng expires_at (không reset lại 30
-      ngày từ đầu, giữ nguyên hạn gốc trừ khi hoạt động liên tục thì rolling như cũ)
+      vô hiệu hoá refresh_token cũ (`revoked_at`, `revoke_reason = "ROTATED"`), tạo refresh_token
+      mới với `expires_at = now() + 30 ngày` — rolling thật sự, reset lại từ đầu mỗi lần refresh
+      thành công (khớp TTL "rolling" ở bảng E.0), không copy `expires_at` của token cũ. User còn
+      hoạt động liên tục thì không bao giờ bị buộc đăng nhập lại; chỉ hết hạn thật khi ngừng hoạt
+      động quá 30 ngày liên tục.
    3. Nếu refresh_token cũ bị dùng lại lần 2 (dấu hiệu bị đánh cắp) → revoke TOÀN BỘ session của
       user, buộc đăng nhập lại mọi thiết bị (reuse detection)
 

@@ -33,6 +33,7 @@ import com.chatapp.core.base.repository.UserRepository;
 import com.chatapp.core.base.repository.UserSessionRepository;
 import com.chatapp.core.exception.DuplicateUserException;
 import com.chatapp.core.exception.InvalidCredentialsException;
+import com.chatapp.core.exception.RefreshTokenInvalidException;
 import com.chatapp.core.exception.SessionNotFoundException;
 import com.chatapp.core.exception.TwoFactorMethodNotEnabledException;
 import com.chatapp.core.geoip.GeoIpService;
@@ -48,14 +49,11 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class AuthServiceImpl implements AuthService {
 
-    private static final long REFRESH_TOKEN_TTL_SECONDS = 2_592_000; // 30 days, rolling
+    private static final long REFRESH_TOKEN_TTL_SECONDS = 2_592_000;
 
-    /** Pseudo-method, not a {@link TwoFactorMethod} enum value — backup codes are an
-     *  account-level fallback (see TwoFactorBackupCodeService), not a row in
-     *  `two_factor_methods`, so they can't share that enum without implying a "method" that
-     *  doesn't actually exist as its own config. Handled as a special case everywhere the
-     *  real methods go through {@link TwoFactorChallengeDispatcher}. */
     private static final String BACKUP_CODE_METHOD = "BACKUP_CODE";
+
+    private static final String ROTATED_REVOKE_REASON = "ROTATED";
 
     private final UserRepository userRepository;
     private final UserSessionRepository userSessionRepository;
@@ -194,6 +192,50 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     @Transactional
+    public AuthResult refreshToken(String refreshToken, String ipAddress, String userAgent) {
+        if (refreshToken == null || refreshToken.isBlank()) {
+            throw new RefreshTokenInvalidException("Missing refresh_token");
+        }
+        String tokenHash = sha256Hex(refreshToken);
+        Instant now = Instant.now();
+
+        UserSessionEntity session = userSessionRepository
+                .findByTokenHashAndIsActiveTrueAndExpiresAtAfter(tokenHash, now)
+                .orElse(null);
+
+        if (session == null) {
+            detectReuseAndRevokeAll(tokenHash, now);
+            throw new RefreshTokenInvalidException("Invalid or expired refresh_token");
+        }
+
+        session.revoke(ROTATED_REVOKE_REASON);
+
+        UserEntity user = userRepository.findById(session.getUserId())
+                .orElseThrow(() -> new RefreshTokenInvalidException("Invalid or expired refresh_token"));
+
+        return issueTokens(user, session, ipAddress, userAgent);
+    }
+
+
+    private void detectReuseAndRevokeAll(String tokenHash, Instant now) {
+        userSessionRepository.findByTokenHash(tokenHash)
+                .filter(revoked -> ROTATED_REVOKE_REASON.equals(revoked.getRevokeReason()))
+                .ifPresent(revoked -> {
+                    UUID userId = revoked.getUserId();
+                    for (UserSessionEntity active : userSessionRepository
+                            .findAllByUserIdAndIsActiveTrueAndExpiresAtAfter(userId, now)) {
+                        active.revoke("REFRESH_TOKEN_REUSE_DETECTED");
+                    }
+                    jwtRevocationService.revokeAllForUser(userId, jwtTokenProvider.getAccessTokenTtlSeconds());
+                    // TODO(outbox-pattern): publish a security-alert event on user.exchange once
+                    // the outbox table + relay worker exist (skills/outbox-pattern.md) so
+                    // Notification Service can warn the user — no direct RabbitMQ publish here
+                    // in the meantime.
+                });
+    }
+
+    @Override
+    @Transactional
     public void logout(String refreshToken, String accessToken, String ipAddress, String userAgent) {
         UserSessionEntity session = null;
         if (refreshToken != null && !refreshToken.isBlank()) {
@@ -288,8 +330,26 @@ public class AuthServiceImpl implements AuthService {
         user.recordLogin();
         userRepository.save(user);
 
-        String accessToken = jwtTokenProvider.generateAccessToken(user.getId());
+        return buildAuthResult(user, session, rawRefreshToken);
+    }
 
+    private AuthResult issueTokens(UserEntity user, UserSessionEntity previousSession, String ipAddress, String userAgent) {
+        String rawRefreshToken = UUID.randomUUID().toString();
+        String tokenHash = sha256Hex(rawRefreshToken);
+        Instant expiresAt = Instant.now().plusSeconds(REFRESH_TOKEN_TTL_SECONDS);
+        GeoLookupResult geo = geoIpService.lookup(ipAddress);
+
+        UserSessionEntity session = new UserSessionEntity(
+                tokenHash, user.getId(),
+                previousSession.getDeviceId(), previousSession.getDeviceName(), previousSession.getPlatform(),
+                ipAddress, userAgent, geo.country(), geo.city(), expiresAt);
+        userSessionRepository.save(session);
+
+        return buildAuthResult(user, session, rawRefreshToken);
+    }
+
+    private AuthResult buildAuthResult(UserEntity user, UserSessionEntity session, String rawRefreshToken) {
+        String accessToken = jwtTokenProvider.generateAccessToken(user.getId());
         return new AuthResult(
                 UserResponse.from(user),
                 accessToken,

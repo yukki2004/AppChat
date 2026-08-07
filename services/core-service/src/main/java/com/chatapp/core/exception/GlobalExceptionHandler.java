@@ -44,6 +44,12 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.fail("SESSION_NOT_FOUND", ex.getMessage()));
     }
 
+    @ExceptionHandler(RefreshTokenInvalidException.class)
+    public ResponseEntity<ApiResponse<Void>> handleRefreshTokenInvalid(RefreshTokenInvalidException ex) {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(ApiResponse.fail("REFRESH_TOKEN_INVALID", ex.getMessage()));
+    }
+
     @ExceptionHandler(OtpLockedException.class)
     public ResponseEntity<ApiResponse<Void>> handleOtpLocked(OtpLockedException ex) {
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)

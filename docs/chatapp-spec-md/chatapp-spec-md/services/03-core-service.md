@@ -256,7 +256,7 @@ verify, hoặc không trả field đó, KHÔNG được tự động link — ph
 | expires_at | TIMESTAMPTZ | NO | – | UTC – hết hạn (now + 30d) |
 | last_active_at | TIMESTAMPTZ | NO | now() | UTC – hoạt động cuối |
 | revoked_at | TIMESTAMPTZ | YES | NULL | UTC – bị thu hồi |
-| revoke_reason | VARCHAR(50) | YES | NULL | logout / admin_block / password_change / all_logout |
+| revoke_reason | VARCHAR(50) | YES | NULL | `USER_LOGOUT` / `USER_LOGOUT_ALL` / `USER_REVOKED_REMOTE` (đăng xuất 1 thiết bị khác) / `ROTATED` (refresh_token bị thay bằng token mới, xem `system/05-cookie-auth-flow.md` E.5) / `REFRESH_TOKEN_REUSE_DETECTED` (token đã `ROTATED` bị dùng lại — nghi bị đánh cắp, revoke toàn bộ session của user) |
 | created_at | TIMESTAMPTZ | NO | now() | UTC |
 
 ### **ð otp_codes  [PostgreSQL]**

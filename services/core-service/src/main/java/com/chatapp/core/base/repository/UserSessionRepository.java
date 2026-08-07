@@ -16,6 +16,8 @@ public interface UserSessionRepository extends JpaRepository<UserSessionEntity, 
      *  30+ days past its `expiresAt` would otherwise still read back as active. */
     Optional<UserSessionEntity> findByTokenHashAndIsActiveTrueAndExpiresAtAfter(String tokenHash, Instant now);
 
+    Optional<UserSessionEntity> findByTokenHash(String tokenHash);
+
     Optional<UserSessionEntity> findByIdAndUserIdAndIsActiveTrueAndExpiresAtAfter(UUID id, UUID userId, Instant now);
 
     List<UserSessionEntity> findAllByUserIdAndIsActiveTrueAndExpiresAtAfter(UUID userId, Instant now);

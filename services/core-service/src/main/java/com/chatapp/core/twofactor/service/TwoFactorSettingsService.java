@@ -94,7 +94,8 @@ public class TwoFactorSettingsService {
                 twoFactorBackupCodeService.generateIfAbsent(userId).orElse(null));
     }
 
-    @Transactional(readOnly = true)
+
+    @Transactional
     public void setupEmail(UUID userId) {
         UserEntity user = requireUser(userId);
         requireNotAlreadyEnabled(userId, TwoFactorMethod.EMAIL);

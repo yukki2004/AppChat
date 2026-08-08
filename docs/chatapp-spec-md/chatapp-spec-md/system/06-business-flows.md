@@ -29,17 +29,23 @@
 | 4 | Core Service | Ghi login_audit_logs (LOGIN_SUCCESS/FAILED) | – | Cùng transaction DB |
 | 5 | Core Service → Client | Set-Cookie access_token (15p) + Set-Cookie refresh_token (30d), cả 2 HttpOnly; Secure; SameSite=Strict | REST response | Chi tiết cookie: `05-cookie-auth-flow.md` E.1 |
 
-### **F.2 Đăng nhập qua bên thứ 3 (Google/Facebook/Apple)**
+### **F.2 Đăng nhập qua bên thứ 3 (Google/Facebook/Apple) — "Kiểu B", frontend hứng code**
+
+> Chọn kiểu frontend tự hứng `code` (thay vì để provider redirect thẳng vào backend) vì dùng
+> chung được đúng 1 API cho cả web và mobile app sau này — mobile native SDK cũng chỉ đưa `code`/
+> `id_token` cho app rồi app tự POST lên, không có khái niệm "provider redirect thẳng vào
+> backend" trên mobile. Xem thêm `services/03-core-service.md` mục "Redirect flow — Kiểu B".
 
 |  |  |  |  |  |
 | :-: | :-: | :-: | :-: | :-: |
 | **#** | **Actor / Service** | **Hành động** | **Giao thức** | **Ghi chú** |
-| 1 | Client → Provider (Google/FB/Apple) | Redirect tới trang consent của provider | REST (browser redirect) | Không qua API Gateway ở bước này |
-| 2 | Provider → API Gateway | Callback kèm authorization code | REST | GET /auth/oauth/callback?code=... |
-| 3 | API Gateway → Core Service | Forward code | REST |   |
-| 4 | Core Service → Provider | Đổi code lấy access_token + profile | REST (ra ngoài internet) | Không phải gRPC vì đây là gọi API bên thứ 3, không phải nội bộ |
-| 5 | Core Service | Upsert user_oauth_providers, tạo user nếu chưa có, tạo refresh_token + access_token | – | Giống bước 3-4 ở F.1 |
-| 6 | Core Service → Client | Set-Cookie access_token + refresh_token, redirect về app | REST |   |
+| 1 | Client (frontend) → Provider (Google/FB/Apple) | Redirect tới trang consent của provider, `redirect_uri` trỏ về 1 route của FRONTEND (không phải backend) | REST (browser redirect) | Không qua API Gateway ở bước này |
+| 2 | Provider → Client (frontend) | Redirect trình duyệt về lại route frontend đã khai, kèm `?code=...` | REST (browser redirect) | Backend không thấy request này |
+| 3 | Client (frontend) → API Gateway → Core Service | Đọc `code` từ URL bằng JS, POST lên backend | REST | `POST /auth/oauth/{provider}/callback {code}` |
+| 4 | Core Service → Provider | Đổi code lấy id_token/access_token + profile (`GoogleOAuthStrategy.exchangeCode`) | REST (ra ngoài internet) | Không phải gRPC vì đây là gọi API bên thứ 3, không phải nội bộ |
+| 5 | Core Service | Tìm `user_oauth_providers` theo `(provider, provider_user_id)` — có thì login, chưa có thì tạo user mới (1 provider/user, KHÔNG link nếu email đã tồn tại — xem `03-core-service.md`) | – | `OAuthServiceImpl.loginWithCallback` |
+| 6 | Core Service | Nếu account có 2FA bật → phát `pre_auth_token`, bắt verify 2FA xong mới qua bước 7 (`AuthService#completeLogin`, dùng chung với login password) | – | Giống hệt luồng 2FA ở F.1 |
+| 7 | Core Service → Client | 200 JSON + Set-Cookie access_token + refresh_token (không redirect — đây là response của 1 API JSON bình thường) | REST |   |
 
 ### **F.3 Đổi mật khẩu**
 

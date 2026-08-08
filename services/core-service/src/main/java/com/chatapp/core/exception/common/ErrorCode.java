@@ -67,7 +67,13 @@ public enum ErrorCode {
     TWO_FACTOR_METHOD_ALREADY_ENABLED(5004, "This 2FA method is already enabled for this account", HttpStatus.CONFLICT),
 
     // twofactor/otp (shared OTP attempt lockout, e.g. email 2FA / password reset code)
-    OTP_LOCKED(6001, "Too many failed attempts — try again in a few minutes", HttpStatus.TOO_MANY_REQUESTS);
+    OTP_LOCKED(6001, "Too many failed attempts — try again in a few minutes", HttpStatus.TOO_MANY_REQUESTS),
+
+    // auth/oauth (POST /auth/oauth/{provider}/callback)
+    OAUTH_PROVIDER_UNSUPPORTED(7001, "Unsupported OAuth provider", HttpStatus.BAD_REQUEST),
+    OAUTH_CODE_EXCHANGE_FAILED(7002, "Failed to exchange authorization code with provider", HttpStatus.UNAUTHORIZED),
+    OAUTH_EMAIL_ALREADY_REGISTERED(7003,
+            "This email is already registered — sign in with your original method instead", HttpStatus.CONFLICT);
 
     int code;
     String message;

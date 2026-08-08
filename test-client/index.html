@@ -68,6 +68,19 @@
 </details>
 
 <details open class="step">
+  <summary>2b. Đăng nhập bằng Google</summary>
+  <p>"Kiểu B" — trang này tự redirect sang Google, tự bắt <code>code</code> từ redirect trở về
+  (xem đoạn JS đọc <code>location.search</code> lúc trang load), rồi POST lên backend. Cần đã
+  điền <code>GOOGLE_OAUTH_CLIENT_ID</code>/<code>GOOGLE_OAUTH_REDIRECT_URI</code> ở
+  <code>.env.dev.local</code> và đăng ký đúng 2 giá trị đó trên Google Cloud Console (Authorized
+  redirect URIs = <code>http://localhost:5500/</code>) — xem README.</p>
+  <input id="google-client-id" placeholder="Google OAuth client_id (dán từ Google Cloud Console)"
+         value="311438681790-frdars7gmthbnv7q9n8uk9mml1mbmf3t.apps.googleusercontent.com" />
+  <button onclick="loginWithGoogle()">Đăng nhập bằng Google</button>
+  <p>Nếu kết quả trả về <code>requires_2fa</code>, dùng bước 4 bên dưới y hệt luồng login password.</p>
+</details>
+
+<details open class="step">
   <summary>3. Bật xác thực 2 lớp (phải đăng nhập trước — đã có cookie access_token)</summary>
   <button onclick="totpSetup()">TOTP: tạo mã</button>
   <div id="totp-qr"></div>
@@ -376,6 +389,51 @@ function checkAuth() {
 function val(id) {
   return document.getElementById(id).value;
 }
+
+/** "Kiểu B" (docs/.../06-business-flows.md F.2): this page redirects to Google itself instead of
+ *  letting Core Service catch the redirect, so the same POST callback API also works unchanged
+ *  for a future mobile client (native SDK hands the app a code the same way). */
+function loginWithGoogle() {
+  const clientId = val('google-client-id');
+  if (!clientId) {
+    log('Điền google-client-id trước (Google Cloud Console -> Credentials).', false);
+    return;
+  }
+  const state = crypto.randomUUID();
+  sessionStorage.setItem('oauth_state', state);
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: window.location.origin + '/',
+    response_type: 'code',
+    scope: 'openid email profile',
+    state,
+  });
+  window.location.href = 'https://accounts.google.com/o/oauth2/v2/auth?' + params;
+}
+
+/** Runs on every page load — if we just got redirected back from Google, the URL carries
+ *  ?code=...&state=... (see loginWithGoogle above). Google itself never sends event state to
+ *  a server-side listener; only the browser that started the redirect sees it, which is why the
+ *  state check happens here in JS, not in Core Service. */
+async function handleOAuthRedirectIfAny() {
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get('code');
+  const state = params.get('state');
+  if (!code) return;
+
+  history.replaceState({}, '', window.location.pathname);
+
+  const expectedState = sessionStorage.getItem('oauth_state');
+  sessionStorage.removeItem('oauth_state');
+  if (!expectedState || state !== expectedState) {
+    log('OAuth state mismatch — có thể bị CSRF, huỷ luôn không gọi backend.', false);
+    return;
+  }
+
+  await call('POST', '/auth/oauth/google/callback', { code });
+}
+
+handleOAuthRedirectIfAny();
 </script>
 </body>
 </html>

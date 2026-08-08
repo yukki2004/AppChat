@@ -82,3 +82,29 @@ stored and sent back by the browser, exactly like a real client would.
   (same as change password) — log in again with the new password afterward.
 - Phone/SMS isn't wired up yet (no SMS sender implemented anywhere in the service) — email only
   for now.
+
+## Testing Google OAuth login (section 2b)
+
+- Needs a Google Cloud Console OAuth client (Credentials -> Create Credentials -> OAuth client
+  ID -> Web application) with **Authorized JavaScript origins = `http://localhost:5500`** and
+  **Authorized redirect URIs = `http://localhost:5500/`** — this page IS the redirect target
+  ("Kiểu B", see `docs/.../06-business-flows.md` F.2: the page itself catches Google's redirect
+  and POSTs the code, Core Service never sees Google's redirect directly).
+- Put the client_id/client_secret from that screen into `.env.dev.local`:
+  ```
+  GOOGLE_OAUTH_CLIENT_ID=...
+  GOOGLE_OAUTH_CLIENT_SECRET=...
+  GOOGLE_OAUTH_REDIRECT_URI=http://localhost:5500/
+  ```
+  (Core Service reads these via `OAuthProperties` — see `application.yml`'s `app.oauth.providers.google`.)
+- Paste the same client_id into the "google-client-id" field in section 2b (only the secret is
+  server-side; the client_id is public and only needed here to build the redirect URL).
+- After clicking through Google's consent screen, this page reloads at `http://localhost:5500/
+  ?code=...&state=...` — a bit of JS (`handleOAuthRedirectIfAny`, runs automatically on load)
+  checks the `state` it stashed in `sessionStorage` before redirecting (basic CSRF guard,
+  entirely client-side — Core Service never sees `state`), then POSTs the code to
+  `/auth/oauth/google/callback`. If the account already has 2FA enabled, this behaves exactly
+  like section 2 (password login) — use section 4 to complete the challenge.
+- 1 Google account = 1 ChatApp user, no account linking (see `03-core-service.md`): a Google
+  email that already belongs to an existing user (password or a different provider) gets
+  rejected with `OAUTH_EMAIL_ALREADY_REGISTERED`, not silently merged.

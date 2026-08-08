@@ -74,8 +74,20 @@ com.chatapp.core/
 ├── auth/                      # register/login + luồng login-2FA (challenge/submit) — Controller/
 │   │                            # Service/DTO/PreAuthTokenService, KHÔNG có Entity/Repository riêng
 │   ├── AuthController.java, AuthService.java (interface) / impl/AuthServiceImpl.java
+│   ├── AuthCookieBuilder.java     # set/clear access_token+refresh_token cookie — dùng chung
+│   │                                giữa AuthController VÀ OAuthController (auth/oauth/), tránh
+│   │                                lệch cấu hình cookie (HttpOnly/Secure/SameSite) giữa 2 nơi
 │   ├── PreAuthTokenService.java
-│   └── dto/request/, dto/response/
+│   ├── dto/request/, dto/response/
+│   └── oauth/                  # OAuth2 login (#4 Google đã code, #5-6 Facebook/Apple chưa) —
+│       │                          strategy pattern giống twofactor/strategy/, xem "Lưu ý khi
+│       │                          code" #15 — Entity/Repository (UserOAuthProviderEntity) vẫn ở
+│       │                          base/ theo đúng quy tắc chung, KHÔNG nằm trong oauth/
+│       ├── OAuthController.java, OAuthService.java (interface) / service/OAuthServiceImpl.java
+│       ├── strategy/            # OAuthProviderStrategy + OAuthProviderDispatcher + 1 impl/provider
+│       │                          (GoogleOAuthStrategy.java — thêm Facebook/Apple sau chỉ cần
+│       │                          thêm 1 class impl mới, không sửa Dispatcher/Controller/Service)
+│       └── dto/                 # OAuthUserInfo (record chuẩn hoá output mọi strategy), request/
 ├── twofactor/                 # strategy verify theo method (TOTP/EMAIL, SMS chưa làm) + luồng bật
 │   │                            # 2FA (/2fa/*) — cũng KHÔNG có Entity/Repository riêng
 │   ├── TwoFactorSettingsController.java / TwoFactorSettingsService.java
@@ -174,6 +186,16 @@ domain, nên tách riêng khỏi `auth/` (domain `auth/` gọi vào `security/`,
     round-trip DB): `save()` KHÔNG insert ngay, Hibernate hoãn tới lúc flush — muốn bắt
     `DataIntegrityViolationException` ngay tại chỗ (VD: unique index chặn race condition) PHẢI
     dùng `saveAndFlush()`, không phải `save()`. Xem `FriendRequestResolver.insertNew()`.
+15. **OAuth2 (#4-6): 1 provider/user, KHÔNG account linking** (product decision, khác thiết kế
+    ban đầu — xem `docs/.../03-core-service.md` mục `user_oauth_providers`) — email OAuth trùng
+    user đã tồn tại thì từ chối (`OAUTH_EMAIL_ALREADY_REGISTERED`), không tự gộp tài khoản.
+    **2FA vẫn bắt buộc qua OAuth** nếu account đã bật — dùng chung `AuthService#completeLogin`
+    với login password, không phát token thật ngay chỉ vì đã qua Google/Facebook/Apple. **Avatar
+    từ provider không tự import vào CDN** — để `avatar_url = NULL` lúc tạo user mới qua OAuth,
+    vì chỉ Media Service được gọi ra ngoài/gọi R2 (nguyên tắc #8 CLAUDE.md root), Core Service
+    không tự tải ảnh từ URL Google. Redirect flow dùng "Kiểu B" (frontend tự hứng `code`, POST
+    lên `POST /auth/oauth/{provider}/callback`), không phải backend tự redirect — xem
+    `system/06-business-flows.md` F.2.
 
 ## Nguyên tắc hiển thị tên/avatar (áp dụng cho service khác đọc dữ liệu từ đây)
 

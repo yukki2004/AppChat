@@ -43,6 +43,12 @@ app:
     issuer: ${TOTP_ISSUER:ChatApp}
   geoip:
     mmdb-path: ${GEOIP_MMDB_PATH:./geoip/GeoLite2-City.mmdb}
+  oauth:
+    providers:
+      google:
+        client-id: ${GOOGLE_OAUTH_CLIENT_ID:}
+        client-secret: ${GOOGLE_OAUTH_CLIENT_SECRET:}
+        redirect-uri: ${GOOGLE_OAUTH_REDIRECT_URI:}
 
 jwt:
   private-key-path: ${JWT_PRIVATE_KEY_PATH:./keys/private_key.pem}

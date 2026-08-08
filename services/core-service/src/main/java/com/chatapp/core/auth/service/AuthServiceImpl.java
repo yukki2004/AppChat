@@ -151,6 +151,16 @@ public class AuthServiceImpl implements AuthService {
             throw new AppException(ErrorCode.ACCOUNT_BLOCKED);
         }
 
+        return completeLogin(user, ipAddress, userAgent);
+    }
+
+    /** Shared by password login (above) and OAuthServiceImpl — decides whether the caller still
+     *  needs a 2FA step or can get real tokens right away. Applies regardless of how the user
+     *  just proved their identity (password or OAuth): an account with 2FA enabled always goes
+     *  through pre_auth_token + challenge/verify, see conversation decision on OAuth+2FA. */
+    @Override
+    @Transactional
+    public LoginOutcome completeLogin(UserEntity user, String ipAddress, String userAgent) {
         List<TwoFactorMethodEntity> twoFactorMethods = twoFactorMethodRepository.findByUserId(user.getId());
         if (!twoFactorMethods.isEmpty()) {
             String preAuthToken = preAuthTokenService.create(user.getId());
@@ -158,11 +168,11 @@ public class AuthServiceImpl implements AuthService {
             if (twoFactorBackupCodeService.hasBackupCodes(user.getId())) {
                 availableMethods.add(BACKUP_CODE_METHOD);
             }
-            log.info("login password OK, 2FA required userId={} availableMethods={}", user.getId(), availableMethods);
+            log.info("completeLogin 2FA required userId={} availableMethods={}", user.getId(), availableMethods);
             return new TwoFactorChallengeResult(preAuthToken, PreAuthTokenService.TTL_SECONDS, availableMethods);
         }
 
-        log.info("login success (no 2FA) userId={}", user.getId());
+        log.info("completeLogin success (no 2FA) userId={}", user.getId());
         return issueTokens(user, ipAddress, userAgent);
     }
 

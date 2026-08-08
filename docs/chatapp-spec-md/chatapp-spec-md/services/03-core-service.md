@@ -210,22 +210,47 @@ public UUID userId;             // camelCase public field
 | :-: | :-: | :-: | :-: | :-: |
 | **Column** | **Type** | **Null** | **Default** | **Mô tả** |
 | **id** | UUID | NO | gen_random_uuid() | PK |
-| **user_id** | UUID FK→users | NO | – | Người dùng |
+| **user_id** | UUID FK→users, UNIQUE | NO | – | Người dùng — UNIQUE vì 1 user chỉ được đúng 1 provider (xem quy tắc dưới) |
 | provider | VARCHAR(20) | NO | – | GOOGLE / FACEBOOK / APPLE |
 | **provider_user_id** | VARCHAR(255) | NO | – | ID từ provider, UNIQUE per provider |
 | provider_email | VARCHAR(255) | YES | NULL | Email từ provider |
-| access_token_enc | TEXT | YES | NULL | Encrypted access token |
-| refresh_token_enc | TEXT | YES | NULL | Encrypted refresh token |
-| token_expires_at | TIMESTAMPTZ | YES | NULL | Hết hạn access token (UTC) |
+| access_token_enc | TEXT | YES | NULL | Encrypted access token — hiện chưa dùng (không có luồng nào gọi lại API provider sau login), để NULL |
+| refresh_token_enc | TEXT | YES | NULL | Encrypted refresh token — hiện chưa dùng, để NULL |
+| token_expires_at | TIMESTAMPTZ | YES | NULL | Hết hạn access token (UTC) — hiện chưa dùng, để NULL |
 | created_at | TIMESTAMPTZ | NO | now() | UTC |
 | updated_at | TIMESTAMPTZ | NO | now() | UTC |
 
-**Quy tắc account linking (bắt buộc, chống account-takeover):** khi OAuth callback trả về email
-trùng với 1 user đã tồn tại (đăng ký bằng email/password hoặc provider khác), CHỈ tự động link
-vào `user_id` đó nếu provider xác nhận `email_verified = true` trong response của họ (Google/
-Facebook đều có field này; Apple luôn coi là verified). Nếu provider không xác nhận email đã
-verify, hoặc không trả field đó, KHÔNG được tự động link — phải bắt user xác minh thêm 1 bước
-(gửi OTP về email đó, xác nhận đúng chủ sở hữu) trước khi gộp 2 tài khoản.
+**Quy tắc: 1 provider/user, KHÔNG account linking (product decision).** Khác thiết kế ban đầu
+(đã cân nhắc rồi bỏ) — mỗi user chỉ được liên kết đúng 1 OAuth provider (UNIQUE `user_id`, không
+phải 1-nhiều). Khi OAuth callback trả về email trùng với 1 user đã tồn tại (đăng ký bằng
+email/password hoặc provider khác), **từ chối luôn** (`ErrorCode.OAUTH_EMAIL_ALREADY_REGISTERED`),
+không tự động gộp/link tài khoản — trả lỗi gợi ý đăng nhập bằng phương thức gốc. Lý do: tránh
+việc phải xây thêm màn hình "connected accounts" để user tự gỡ/quản lý nhiều provider (chưa có
+trong scope #4-6), và đơn giản hoá luồng OAuth ban đầu. `emailVerified` từ provider (Google/
+Facebook có field `email_verified`, Apple luôn coi là verified) hiện chỉ dùng để quyết định có
+tạo user mới hay không trong nội bộ `OAuthServiceImpl`, không dùng để tự động link.
+
+**2FA vẫn áp dụng cho login OAuth** (product decision): nếu account đã bật TOTP/Email 2FA, login
+qua Google/Facebook/Apple vẫn phải qua `pre_auth_token` + `TwoFactorChallengeDispatcher` giống hệt
+login password, không phát access/refresh token thật ngay — xem `AuthService#completeLogin`
+(dùng chung giữa `AuthServiceImpl.login()` và `OAuthServiceImpl.loginWithCallback()`).
+
+**Redirect flow — "Kiểu B"**: frontend tự redirect sang provider và tự bắt `code` từ redirect trở
+về (không phải Core Service hứng redirect trực tiếp), rồi POST `code` lên
+`POST /auth/oauth/{provider}/callback` như 1 REST API JSON bình thường — xem
+`system/06-business-flows.md` F.2. Chọn kiểu này (thay vì để backend tự redirect) vì dùng chung
+được 1 API cho cả web và mobile app sau này (mobile native SDK cũng chỉ đưa `code` cho app rồi
+app tự POST lên, không có khái niệm "provider redirect thẳng vào backend" trên mobile).
+
+**Avatar từ provider không được tự động import vào CDN của mình lúc đăng ký OAuth** — `avatar_url`
+để NULL cho user mới tạo qua OAuth, giống hệt user đăng ký email/password mới (chưa có avatar).
+Lý do: `avatar_url` phải là CDN URL của chính mình (Cloudflare), và theo nguyên tắc #8 CLAUDE.md
+root, chỉ Media Service được gọi ra ngoài tải file/gọi R2 — Core Service không được tự tải ảnh từ
+URL của Google rồi lưu thẳng. Import avatar từ provider (nếu làm sau) sẽ là 1 luồng riêng: Core
+publish event `user.avatar_import_requested` (side-effect, không cần response ngay — đúng
+RabbitMQ theo `skills/service-communication.md`) để Media Service tự tải + upload lên R2, rồi
+báo lại qua `media.upload_completed` (event đã có sẵn) với `context_type=avatar` — TODO, chưa
+lên lịch làm.
 
 ### **ð user_sessions  [PostgreSQL (index Redis primary)] — lưu refresh_token, KHÔNG phải access_token**
 

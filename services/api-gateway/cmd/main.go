@@ -60,6 +60,9 @@ func main() {
 	app.Post("/auth/login", forward)
 	app.Post("/auth/login/2fa/challenge", forward)
 	app.Post("/auth/login/2fa", forward)
+	// Also public: OAuth2 login (Google now, Facebook/Apple later) is a login flow, same as
+	// /auth/login — nothing to verify yet since this IS what produces the access_token.
+	app.Post("/auth/oauth/:provider/callback", forward)
 	// Also public: /auth/logout works off the refresh_token cookie alone (see E.7) and must
 	// still succeed when access_token is already expired/missing — logging out shouldn't
 	// require a currently-valid access token.

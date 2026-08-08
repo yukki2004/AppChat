@@ -3,7 +3,6 @@ package com.chatapp.core.auth.controller;
 import java.util.List;
 import java.util.UUID;
 
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
@@ -18,6 +17,7 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.chatapp.core.auth.AuthCookieBuilder;
 import com.chatapp.core.auth.AuthService;
 import com.chatapp.core.auth.dto.request.ChangePasswordRequest;
 import com.chatapp.core.auth.dto.request.ForgotPasswordRequest;
@@ -43,8 +43,9 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
 /**
- * Register/login flow (email/phone + password, no OAuth2 yet) plus the 2-step 2FA
- * challenge/submit flow. Cookies: access_token Path=/, refresh_token Path=/auth (covers
+ * Register/login flow (email/phone + password) plus the 2-step 2FA challenge/submit flow.
+ * OAuth2 login (Google/Facebook/Apple) is a separate controller, see auth/oauth/OAuthController.
+ * Cookies: access_token Path=/, refresh_token Path=/auth (covers
  * /auth/refresh, /auth/logout, /auth/logout-all — see REFRESH_COOKIE_PATH),
  * pre_auth_token Path=/auth/login/2fa — all HttpOnly+Secure+SameSite=Strict, same mechanism,
  * never a token in the response body. Response body is always wrapped in {@link ApiResponse}.
@@ -61,15 +62,13 @@ public class AuthController {
      *  this cookie to those endpoints. "/auth" is the narrowest prefix that covers refresh,
      *  logout, and logout-all all at once while still being HttpOnly and never reaching
      *  non-auth endpoints. */
-    private static final String REFRESH_COOKIE_PATH = "/auth";
+    private static final String REFRESH_COOKIE_PATH = AuthCookieBuilder.REFRESH_COOKIE_PATH;
 
     private static final String RESET_TOKEN_COOKIE_NAME = "reset_token";
     private static final String RESET_TOKEN_COOKIE_PATH = "/auth/password";
 
     private final AuthService authService;
-
-    @Value("${app.cookie-domain:}")
-    private String cookieDomain;
+    private final AuthCookieBuilder cookieBuilder;
 
     @PostMapping("/auth/register")
     public ResponseEntity<ApiResponse<UserResponse>> register(@Valid @RequestBody RegisterRequest request) {
@@ -83,7 +82,7 @@ public class AuthController {
         LoginOutcome outcome = authService.login(request, clientIp, userAgent);
 
         if (outcome instanceof TwoFactorChallengeResult challenge) {
-            ResponseCookie preAuthCookie = buildCookie(
+            ResponseCookie preAuthCookie = cookieBuilder.buildCookie(
                     PRE_AUTH_COOKIE_NAME, challenge.preAuthToken(), PRE_AUTH_COOKIE_PATH, challenge.preAuthTokenTtlSeconds());
             TwoFactorRequiredResponse body = new TwoFactorRequiredResponse(true, challenge.availableMethods());
             return ResponseEntity.ok()
@@ -93,7 +92,7 @@ public class AuthController {
 
         AuthResult result = (AuthResult) outcome;
         return ResponseEntity.ok()
-                .header(HttpHeaders.SET_COOKIE, buildAccessRefreshCookies(result))
+                .header(HttpHeaders.SET_COOKIE, cookieBuilder.buildAccessRefreshCookies(result))
                 .body(ApiResponse.ok(result.user()));
     }
 
@@ -120,7 +119,7 @@ public class AuthController {
                 .httpOnly(true).secure(true).sameSite("Strict").path(PRE_AUTH_COOKIE_PATH).maxAge(0).build();
 
         return ResponseEntity.ok()
-                .header(HttpHeaders.SET_COOKIE, buildAccessRefreshCookies(result))
+                .header(HttpHeaders.SET_COOKIE, cookieBuilder.buildAccessRefreshCookies(result))
                 .header(HttpHeaders.SET_COOKIE, clearPreAuthCookie.toString())
                 .body(ApiResponse.ok(result.user()));
     }
@@ -132,7 +131,7 @@ public class AuthController {
             @RequestHeader(value = "X-Client-IP", required = false) String clientIp) {
         AuthResult result = authService.refreshToken(refreshToken, clientIp, userAgent);
         return ResponseEntity.ok()
-                .header(HttpHeaders.SET_COOKIE, buildAccessRefreshCookies(result))
+                .header(HttpHeaders.SET_COOKIE, cookieBuilder.buildAccessRefreshCookies(result))
                 .body(ApiResponse.ok(result.user()));
     }
 
@@ -144,8 +143,8 @@ public class AuthController {
             @RequestHeader(value = "X-Client-IP", required = false) String clientIp) {
         authService.logout(refreshToken, accessToken, clientIp, userAgent);
         return ResponseEntity.ok()
-                .header(HttpHeaders.SET_COOKIE, buildCookie("access_token", "", "/", 0).toString())
-                .header(HttpHeaders.SET_COOKIE, buildCookie("refresh_token", "", REFRESH_COOKIE_PATH, 0).toString())
+                .header(HttpHeaders.SET_COOKIE, cookieBuilder.buildCookie("access_token", "", "/", 0).toString())
+                .header(HttpHeaders.SET_COOKIE, cookieBuilder.buildCookie("refresh_token", "", REFRESH_COOKIE_PATH, 0).toString())
                 .body(ApiResponse.ok());
     }
 
@@ -185,8 +184,8 @@ public class AuthController {
             return ResponseEntity.ok(ApiResponse.ok());
         }
         return ResponseEntity.ok()
-                .header(HttpHeaders.SET_COOKIE, buildCookie("access_token", "", "/", 0).toString())
-                .header(HttpHeaders.SET_COOKIE, buildCookie("refresh_token", "", REFRESH_COOKIE_PATH, 0).toString())
+                .header(HttpHeaders.SET_COOKIE, cookieBuilder.buildCookie("access_token", "", "/", 0).toString())
+                .header(HttpHeaders.SET_COOKIE, cookieBuilder.buildCookie("refresh_token", "", REFRESH_COOKIE_PATH, 0).toString())
                 .body(ApiResponse.ok());
     }
 
@@ -199,8 +198,8 @@ public class AuthController {
             @RequestHeader(value = "X-Client-IP", required = false) String clientIp) {
         authService.changePassword(userId, request.getOldPassword(), request.getNewPassword(), clientIp, userAgent);
         return ResponseEntity.ok()
-                .header(HttpHeaders.SET_COOKIE, buildCookie("access_token", "", "/", 0).toString())
-                .header(HttpHeaders.SET_COOKIE, buildCookie("refresh_token", "", REFRESH_COOKIE_PATH, 0).toString())
+                .header(HttpHeaders.SET_COOKIE, cookieBuilder.buildCookie("access_token", "", "/", 0).toString())
+                .header(HttpHeaders.SET_COOKIE, cookieBuilder.buildCookie("refresh_token", "", REFRESH_COOKIE_PATH, 0).toString())
                 .body(ApiResponse.ok());
     }
 
@@ -214,7 +213,7 @@ public class AuthController {
     @PostMapping("/auth/password/forgot/verify")
     public ResponseEntity<ApiResponse<Void>> verifyForgotPassword(@Valid @RequestBody ForgotPasswordVerifyRequest request) {
         String resetToken = authService.verifyPasswordResetOtp(request.getEmail(), request.getCode());
-        ResponseCookie cookie = buildCookie(
+        ResponseCookie cookie = cookieBuilder.buildCookie(
                 RESET_TOKEN_COOKIE_NAME, resetToken, RESET_TOKEN_COOKIE_PATH, RedisKeys.RESET_PASSWORD_TOKEN_TTL_SECONDS);
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, cookie.toString())
@@ -226,7 +225,7 @@ public class AuthController {
             @CookieValue(name = RESET_TOKEN_COOKIE_NAME, required = false) String resetToken,
             @Valid @RequestBody ResetPasswordRequest request) {
         authService.resetPassword(resetToken, request.getNewPassword());
-        ResponseCookie clearResetToken = buildCookie(RESET_TOKEN_COOKIE_NAME, "", RESET_TOKEN_COOKIE_PATH, 0);
+        ResponseCookie clearResetToken = cookieBuilder.buildCookie(RESET_TOKEN_COOKIE_NAME, "", RESET_TOKEN_COOKIE_PATH, 0);
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, clearResetToken.toString())
                 .body(ApiResponse.ok());
@@ -238,22 +237,4 @@ public class AuthController {
         }
     }
 
-    private String[] buildAccessRefreshCookies(AuthResult result) {
-        ResponseCookie accessCookie = buildCookie("access_token", result.accessToken(), "/", result.accessTokenTtlSeconds());
-        ResponseCookie refreshCookie = buildCookie("refresh_token", result.refreshToken(), REFRESH_COOKIE_PATH, result.refreshTokenTtlSeconds());
-        return new String[] {accessCookie.toString(), refreshCookie.toString()};
-    }
-
-    private ResponseCookie buildCookie(String name, String value, String path, long maxAgeSeconds) {
-        ResponseCookie.ResponseCookieBuilder builder = ResponseCookie.from(name, value)
-                .httpOnly(true)
-                .secure(true)
-                .sameSite("Strict")
-                .path(path)
-                .maxAge(maxAgeSeconds);
-        if (cookieDomain != null && !cookieDomain.isBlank()) {
-            builder.domain(cookieDomain);
-        }
-        return builder.build();
-    }
 }

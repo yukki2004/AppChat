@@ -25,6 +25,7 @@ import com.chatapp.core.auth.dto.request.ForgotPasswordVerifyRequest;
 import com.chatapp.core.auth.dto.request.LoginRequest;
 import com.chatapp.core.auth.dto.request.RegisterRequest;
 import com.chatapp.core.auth.dto.request.ResetPasswordRequest;
+import com.chatapp.core.auth.dto.request.SetPasswordRequest;
 import com.chatapp.core.auth.dto.request.TwoFactorChallengeRequest;
 import com.chatapp.core.auth.dto.request.TwoFactorSubmitRequest;
 import com.chatapp.core.auth.dto.response.SessionResponse;
@@ -201,6 +202,16 @@ public class AuthController {
                 .header(HttpHeaders.SET_COOKIE, cookieBuilder.buildCookie("access_token", "", "/", 0).toString())
                 .header(HttpHeaders.SET_COOKIE, cookieBuilder.buildCookie("refresh_token", "", REFRESH_COOKIE_PATH, 0).toString())
                 .body(ApiResponse.ok());
+    }
+
+    /** First-time password for an OAuth-only account — see AuthService#setPassword. Not for
+     *  changing an existing password (that's PUT /auth/password, requires oldPassword). */
+    @PostMapping("/auth/password/set")
+    public ResponseEntity<ApiResponse<Void>> setPassword(
+            @RequestHeader("X-User-Id") UUID userId,
+            @Valid @RequestBody SetPasswordRequest request) {
+        authService.setPassword(userId, request.getNewPassword());
+        return ResponseEntity.ok(ApiResponse.ok());
     }
 
     @PostMapping("/auth/password/forgot")

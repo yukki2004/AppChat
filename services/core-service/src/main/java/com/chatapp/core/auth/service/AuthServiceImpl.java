@@ -480,6 +480,22 @@ public class AuthServiceImpl implements AuthService {
         log.info("resetPassword success userId={} — every session revoked", userId);
     }
 
+    @Override
+    @Transactional
+    public void setPassword(UUID userId, String newPassword) {
+        log.debug("setPassword start userId={}", userId);
+        UserEntity user = userRepository.findByIdAndDeletedAtIsNull(userId)
+                .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_FOUND));
+        if (user.getPasswordHash() != null) {
+            log.warn("setPassword rejected userId={} reason=PASSWORD_ALREADY_SET", userId);
+            throw new AppException(ErrorCode.PASSWORD_ALREADY_SET);
+        }
+
+        user.changePassword(passwordEncoder.encode(newPassword));
+        userRepository.save(user);
+        log.info("setPassword success userId={} — no session revoked (nothing was compromised, just adding a login method)", userId);
+    }
+
     private void revokeAllSessions(UUID userId) {
         Instant now = Instant.now();
         for (UserSessionEntity session : userSessionRepository.findAllByUserIdAndIsActiveTrueAndExpiresAtAfter(userId, now)) {

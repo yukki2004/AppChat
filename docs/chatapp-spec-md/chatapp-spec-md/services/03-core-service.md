@@ -242,6 +242,14 @@ về (không phải Core Service hứng redirect trực tiếp), rồi POST `cod
 được 1 API cho cả web và mobile app sau này (mobile native SDK cũng chỉ đưa `code` cho app rồi
 app tự POST lên, không có khái niệm "provider redirect thẳng vào backend" trên mobile).
 
+**User OAuth-only (`password_hash` NULL) phải set password trước khi bật được 2FA (#7-8)** —
+API mới `POST /auth/password/set` (khác `PUT /auth/password` #11: không có old password để
+verify, chỉ chạy được khi `password_hash` hiện đang NULL). `TwoFactorSettingsService.setupTotp()`/
+`setupEmail()` chặn ngay đầu nếu `password_hash == null` (`ErrorCode.PASSWORD_REQUIRED_BEFORE_2FA`).
+Lý do: tắt 1 method 2FA / tạo lại backup code đều re-auth bằng password — không có password thì
+bật 2FA lên là tự kẹt tài khoản vĩnh viễn, không bao giờ tắt được. `setPassword()` không revoke
+session khác (khác `changePassword()`) vì không có credential cũ nào bị coi là lộ.
+
 **Avatar từ provider không được tự động import vào CDN của mình lúc đăng ký OAuth** — `avatar_url`
 để NULL cho user mới tạo qua OAuth, giống hệt user đăng ký email/password mới (chưa có avatar).
 Lý do: `avatar_url` phải là CDN URL của chính mình (Cloudflare), và theo nguyên tắc #8 CLAUDE.md

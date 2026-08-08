@@ -196,6 +196,15 @@ domain, nên tách riêng khỏi `auth/` (domain `auth/` gọi vào `security/`,
     không tự tải ảnh từ URL Google. Redirect flow dùng "Kiểu B" (frontend tự hứng `code`, POST
     lên `POST /auth/oauth/{provider}/callback`), không phải backend tự redirect — xem
     `system/06-business-flows.md` F.2.
+16. **User OAuth-only (`password_hash` NULL) phải set password trước khi bật được bất kỳ method
+    2FA nào** — chặn ở đầu `TwoFactorSettingsService.setupTotp()`/`setupEmail()`
+    (`ErrorCode.PASSWORD_REQUIRED_BEFORE_2FA`), dùng API mới `POST /auth/password/set`
+    (`AuthService#setPassword` — khác `PUT /auth/password` vì không có old password để verify,
+    chỉ chạy được khi `password_hash` hiện đang NULL). Lý do bắt buộc: `disableMethod()`/
+    `regenerateBackupCodes()` re-auth bằng password — nếu không có password thì bật 2FA lên là
+    tự kẹt vĩnh viễn, không bao giờ tắt được. `setPassword()` KHÔNG revoke session khác (khác
+    `changePassword()`) vì không có credential cũ nào bị coi là lộ, chỉ đang thêm 1 cách đăng
+    nhập mới.
 
 ## Nguyên tắc hiển thị tên/avatar (áp dụng cho service khác đọc dữ liệu từ đây)
 

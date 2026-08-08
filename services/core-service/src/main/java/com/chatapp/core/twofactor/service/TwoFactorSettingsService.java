@@ -58,6 +58,7 @@ public class TwoFactorSettingsService {
     @Transactional(readOnly = true)
     public TotpSetupResponse setupTotp(UUID userId) {
         UserEntity user = requireUser(userId);
+        requirePasswordSet(user);
         requireNotAlreadyEnabled(userId, TwoFactorMethod.TOTP);
 
         byte[] rawSecret = new byte[TOTP_SECRET_BYTE_LENGTH];
@@ -97,6 +98,7 @@ public class TwoFactorSettingsService {
     @Transactional
     public void setupEmail(UUID userId) {
         UserEntity user = requireUser(userId);
+        requirePasswordSet(user);
         requireNotAlreadyEnabled(userId, TwoFactorMethod.EMAIL);
 
         String code = otpCodeService.generate(user.getEmail(), OtpPurpose.ENABLE_2FA, userId);
@@ -173,6 +175,16 @@ public class TwoFactorSettingsService {
     private UserEntity requireUser(UUID userId) {
         return userRepository.findById(userId)
                 .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_FOUND));
+    }
+
+    /** OAuth-only accounts (password_hash NULL) must set a password first — disableMethod/
+     *  regenerateBackupCodes below re-auth via password, so enabling 2FA without one would lock
+     *  the account out of ever disabling it or regenerating backup codes. See
+     *  AuthService#setPassword. */
+    private void requirePasswordSet(UserEntity user) {
+        if (user.getPasswordHash() == null) {
+            throw new AppException(ErrorCode.PASSWORD_REQUIRED_BEFORE_2FA);
+        }
     }
 
     private void requireNotAlreadyEnabled(UUID userId, TwoFactorMethod method) {

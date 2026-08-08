@@ -78,6 +78,12 @@
          value="311438681790-frdars7gmthbnv7q9n8uk9mml1mbmf3t.apps.googleusercontent.com" />
   <button onclick="loginWithGoogle()">Đăng nhập bằng Google</button>
   <p>Nếu kết quả trả về <code>requires_2fa</code>, dùng bước 4 bên dưới y hệt luồng login password.</p>
+  <hr />
+  <p>User tạo qua OAuth không có password (<code>password_hash</code> NULL) — phải set password
+  trước khi bật được 2FA ở bước 3 (không thì bước 3 trả lỗi <code>PASSWORD_REQUIRED_BEFORE_2FA</code>),
+  vì bước "tắt 2FA"/"tạo lại backup code" cần verify password mà tài khoản này chưa có.</p>
+  <input id="set-password-new" placeholder="mật khẩu mới (tối thiểu 8 ký tự)" type="password" />
+  <button onclick="setPassword()">Set password lần đầu (chỉ dùng được khi chưa có password)</button>
 </details>
 
 <details open class="step">
@@ -353,6 +359,10 @@ async function logoutOthers() {
 function fmtTime(iso) {
   if (!iso) return '-';
   return new Date(iso).toLocaleString('vi-VN');
+}
+
+function setPassword() {
+  return call('POST', '/auth/password/set', { new_password: val('set-password-new') });
 }
 
 function changePassword() {

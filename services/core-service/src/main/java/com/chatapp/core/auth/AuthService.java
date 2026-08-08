@@ -36,6 +36,11 @@ public interface AuthService {
 
     void changePassword(UUID userId, String oldPassword, String newPassword, String ipAddress, String userAgent);
 
+    /** First-time password for an OAuth-only account (password_hash currently NULL) — see
+     *  conversation decision: OAuth users must set a password before enabling 2FA, so
+     *  disableMethod/regenerateBackupCodes (which re-auth via password) never lock them out. */
+    void setPassword(UUID userId, String newPassword);
+
     void forgotPassword(String email);
 
     String verifyPasswordResetOtp(String email, String code);

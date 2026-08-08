@@ -73,7 +73,13 @@ public enum ErrorCode {
     OAUTH_PROVIDER_UNSUPPORTED(7001, "Unsupported OAuth provider", HttpStatus.BAD_REQUEST),
     OAUTH_CODE_EXCHANGE_FAILED(7002, "Failed to exchange authorization code with provider", HttpStatus.UNAUTHORIZED),
     OAUTH_EMAIL_ALREADY_REGISTERED(7003,
-            "This email is already registered — sign in with your original method instead", HttpStatus.CONFLICT);
+            "This email is already registered — sign in with your original method instead", HttpStatus.CONFLICT),
+
+    // auth/password/set (POST /auth/password/set) — first-time password for OAuth-only accounts
+    PASSWORD_ALREADY_SET(7004, "Password is already set — use PUT /auth/password to change it", HttpStatus.CONFLICT),
+    // twofactor/ setup (POST /2fa/totp/setup, /2fa/email/setup)
+    PASSWORD_REQUIRED_BEFORE_2FA(7005,
+            "Set a password first (POST /auth/password/set) before enabling 2FA", HttpStatus.BAD_REQUEST);
 
     int code;
     String message;

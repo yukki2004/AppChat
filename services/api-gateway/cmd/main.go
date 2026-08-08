@@ -64,15 +64,24 @@ func main() {
 	// still succeed when access_token is already expired/missing — logging out shouldn't
 	// require a currently-valid access token.
 	app.Post("/auth/logout", forward)
+	// Also public: the whole point of forgot-password is the caller has no valid access_token
+	// yet — identity here comes from the OTP (forgot/verify) and then the short-lived
+	// reset_token cookie (reset), never from a verified JWT.
+	app.Post("/auth/password/forgot", forward)
+	app.Post("/auth/password/forgot/verify", forward)
+	app.Post("/auth/password/reset", forward)
 
 	// Protected — requires a verified access_token, forwarded downstream as X-User-Id.
 	app.Post("/2fa/totp/setup", authRequired, forward)
 	app.Post("/2fa/totp/confirm", authRequired, forward)
 	app.Post("/2fa/email/setup", authRequired, forward)
 	app.Post("/2fa/email/confirm", authRequired, forward)
+	app.Post("/2fa/backup-codes/regenerate", authRequired, forward)
 	app.Delete("/2fa/:method", authRequired, forward)
+	app.Get("/auth/sessions", authRequired, forward)
 	app.Delete("/auth/sessions/:sessionId", authRequired, forward)
 	app.Post("/auth/logout-all", authRequired, forward)
+	app.Put("/auth/password", authRequired, forward)
 
 	log.Printf("api-gateway starting on :%s (env=%s, core_service=%s)", cfg.Port, cfg.Env, cfg.CoreServiceURL)
 	if err := app.Listen(":" + cfg.Port); err != nil {

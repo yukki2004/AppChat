@@ -1,126 +1,194 @@
 <!doctype html>
-<html lang="en">
+<html lang="vi">
 <head>
 <meta charset="utf-8" />
-<title>ChatApp — test client (throwaway)</title>
+<title>ChatApp — trang test (dùng tạm)</title>
 <style>
-  body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
+  body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto 14rem; padding: 0 1rem; }
   section { border: 1px solid #ccc; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
   h2 { margin-top: 0; font-size: 1rem; }
   input { display: block; width: 100%; margin: 0.25rem 0 0.5rem; padding: 0.4rem; box-sizing: border-box; }
   button { padding: 0.4rem 0.8rem; cursor: pointer; }
+  button.danger { background: #fbeaea; border-color: #d33; color: #a00; }
   pre { background: #f4f4f4; padding: 0.5rem; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
   .row { display: flex; gap: 0.5rem; }
   .row > * { flex: 1; }
+
+  /* Mỗi bước gập lại được — bấm vào tiêu đề để mở/đóng. Bước nào test xong thì đóng lại cho đỡ
+     rối mắt; trang không nhớ trạng thái qua lần tải lại, chấp nhận được vì đây chỉ là công cụ
+     test tạm thời. */
+  details.step { border: 1px solid #ccc; border-radius: 8px; padding: 0 1rem 1rem; margin-bottom: 0.75rem; }
+  details.step[open] { padding-top: 0.25rem; }
+  details.step summary { cursor: pointer; font-weight: 600; padding: 0.75rem 0; list-style: none; }
+  details.step summary::-webkit-details-marker { display: none; }
+  details.step summary::before { content: "▸ "; color: #888; }
+  details.step[open] summary::before { content: "▾ "; }
+  details.step summary:hover { color: #0645ad; }
+
+  /* Ô kết quả ghim cố định dưới đáy màn hình — khỏi phải cuộn xuống sau mỗi lần bấm nút để xem
+     kết quả request vừa gọi. */
+  #log-section { position: fixed; left: 0; right: 0; bottom: 0; margin: 0; border-radius: 0;
+                 border-width: 1px 0 0; max-height: 12rem; overflow-y: auto; background: #fff;
+                 box-shadow: 0 -2px 8px rgba(0,0,0,0.1); }
+  #log-section h2 { display: inline-block; margin-right: 0.5rem; }
+  #log.ok { background: #eaf7ea; }
+  #log.err { background: #fbeaea; }
+
+  table.sessions { width: 100%; border-collapse: collapse; margin: 0.5rem 0; font-size: 0.85rem; }
+  table.sessions th, table.sessions td { border: 1px solid #ddd; padding: 0.3rem 0.4rem; text-align: left; }
+  table.sessions tr.current { background: #eaf3ff; }
 </style>
 </head>
 <body>
-<h1>ChatApp test client</h1>
-<p>Talks to API Gateway at <code>http://localhost:8080</code>. See <code>README.md</code> for how to run this.</p>
+<h1>ChatApp — trang test</h1>
+<p>Gọi tới API Gateway ở <code>http://localhost:8080</code>. Xem <code>README.md</code> để biết cách chạy.</p>
 
-<section>
-  <h2>0. Simulate client IP (geo-location testing)</h2>
-  <input id="sim-ip" placeholder="e.g. 8.8.8.8 — leave empty for real local IP" />
-  <p>Sent as <code>X-Forwarded-For</code> on every request below. Gateway has no real reverse
-  proxy in front of it locally, so it trusts this header as-is (see <code>clientip.go</code>).</p>
-</section>
+<details open class="step">
+  <summary>0. Giả lập IP client (test định vị địa lý)</summary>
+  <input id="sim-ip" placeholder="VD: 8.8.8.8 — để trống thì dùng IP local thật" />
+  <p>Giá trị này được gửi kèm header <code>X-Forwarded-For</code> ở mọi request bên dưới. Gateway
+  chạy local không có reverse proxy thật đứng trước nên nó tin luôn header này (xem <code>clientip.go</code>).</p>
+</details>
 
-<section>
-  <h2>1. Register</h2>
+<details open class="step">
+  <summary>1. Đăng ký</summary>
   <input id="reg-username" placeholder="username" value="demo1" />
   <input id="reg-email" placeholder="email" value="demo1@test.com" />
-  <input id="reg-password" placeholder="password" value="password123" type="password" />
-  <input id="reg-displayname" placeholder="display name" value="Demo One" />
-  <button onclick="register()">Register</button>
-</section>
+  <input id="reg-password" placeholder="mật khẩu" value="password123" type="password" />
+  <input id="reg-displayname" placeholder="tên hiển thị" value="Demo One" />
+  <button onclick="register()">Đăng ký</button>
+</details>
 
-<section>
-  <h2>2. Login</h2>
-  <input id="login-identifier" placeholder="username/email/phone" value="demo1" />
-  <input id="login-password" placeholder="password" value="password123" type="password" />
-  <button onclick="login()">Login</button>
-  <p>If <code>requires_2fa</code> comes back, use section 4 below with a method from <code>available_methods</code>.</p>
-</section>
+<details open class="step">
+  <summary>2. Đăng nhập</summary>
+  <input id="login-identifier" placeholder="username/email/sđt" value="demo1" />
+  <input id="login-password" placeholder="mật khẩu" value="password123" type="password" />
+  <button onclick="login()">Đăng nhập</button>
+  <p>Nếu kết quả trả về <code>requires_2fa</code>, dùng bước 4 bên dưới với 1 method trong <code>available_methods</code>.</p>
+</details>
 
-<section>
-  <h2>3. Enable 2FA (must already be logged in — access_token cookie set)</h2>
-  <button onclick="totpSetup()">TOTP: setup</button>
+<details open class="step">
+  <summary>3. Bật xác thực 2 lớp (phải đăng nhập trước — đã có cookie access_token)</summary>
+  <button onclick="totpSetup()">TOTP: tạo mã</button>
   <div id="totp-qr"></div>
   <div id="totp-setup-result"></div>
   <div class="row">
-    <input id="totp-confirm-code" placeholder="code from authenticator app" />
-    <button onclick="totpConfirm()">TOTP: confirm</button>
+    <input id="totp-confirm-code" placeholder="mã từ app authenticator" />
+    <button onclick="totpConfirm()">TOTP: xác nhận</button>
   </div>
   <hr />
-  <button onclick="emailSetup()">EMAIL: setup (sends real email)</button>
+  <button onclick="emailSetup()">EMAIL: bật (gửi email thật)</button>
   <div class="row">
-    <input id="email-confirm-code" placeholder="code from email" />
-    <button onclick="emailConfirm()">EMAIL: confirm</button>
+    <input id="email-confirm-code" placeholder="mã nhận từ email" />
+    <button onclick="emailConfirm()">EMAIL: xác nhận</button>
   </div>
   <hr />
   <div class="row">
-    <input id="disable-method" placeholder="TOTP or EMAIL" />
-    <input id="disable-password" placeholder="password" type="password" />
-    <button onclick="disableMethod()">Disable method</button>
+    <input id="disable-method" placeholder="TOTP hoặc EMAIL" />
+    <input id="disable-password" placeholder="mật khẩu" type="password" />
+    <button onclick="disableMethod()">Tắt method</button>
   </div>
-</section>
-
-<section>
-  <h2>4. Login 2FA (after step 2 returned requires_2fa)</h2>
+  <hr />
+  <p><b>Backup codes</b> — tự động cấp 8 mã dự phòng ngay khi bật method 2FA ĐẦU TIÊN (xem kết
+  quả bên dưới ngay sau khi "TOTP: xác nhận"/"EMAIL: xác nhận" thành công). Mỗi mã chỉ dùng được
+  1 lần, dùng thay TOTP/EMAIL lúc đăng nhập nếu mất quyền truy cập method chính — xem bước 4 bên
+  dưới, gõ <code>BACKUP_CODE</code> vào ô method.</p>
+  <div id="backup-codes-display"></div>
   <div class="row">
-    <input id="challenge-method" placeholder="TOTP or EMAIL" />
-    <button onclick="challenge()">Challenge (request/ack code)</button>
+    <input id="regen-backup-password" placeholder="mật khẩu (để tạo lại)" type="password" />
+    <button onclick="regenerateBackupCodes()">Tạo lại backup codes (huỷ hết mã cũ)</button>
+  </div>
+</details>
+
+<details open class="step">
+  <summary>4. Đăng nhập 2FA (sau khi bước 2 báo requires_2fa)</summary>
+  <div class="row">
+    <input id="challenge-method" placeholder="TOTP / EMAIL / BACKUP_CODE" />
+    <button onclick="challenge()">Yêu cầu gửi mã</button>
+  </div>
+  <p>Với <code>BACKUP_CODE</code>: bấm "Yêu cầu gửi mã" chỉ để xác nhận còn mã dự phòng khả dụng
+  (không gửi email/sms gì cả) — điền thẳng 1 trong các backup code (dạng <code>XXXX-XXXX</code>)
+  vào ô mã xác thực bên dưới rồi gửi luôn.</p>
+  <div class="row">
+    <input id="submit-code" placeholder="mã xác thực" />
+    <button onclick="submitTwoFactor()">Gửi mã xác thực</button>
+  </div>
+</details>
+
+<details open class="step">
+  <summary>5. Đăng xuất (thiết bị hiện tại)</summary>
+  <p>Thu hồi refresh_token của thiết bị này + chặn ngay lập tức đúng access_token (<code>jti</code>)
+  đang dùng. Xoá cả 2 cookie.</p>
+  <button onclick="logout()">Đăng xuất</button>
+</details>
+
+<details open class="step">
+  <summary>6. Danh sách thiết bị — xem &amp; đăng xuất từng thiết bị</summary>
+  <p>Muốn có 1 phiên khác để test thì đăng nhập từ 1 cửa sổ ẩn danh/trình duyệt khác (trang này
+  chỉ giữ 1 cookie jar, đăng nhập lại ở đây chỉ xoay vòng đúng phiên hiện tại). Dòng tô xanh là
+  thiết bị bạn đang dùng ngay lúc này.</p>
+  <div class="row">
+    <button onclick="listSessions()">Tải lại danh sách</button>
+    <button class="danger" onclick="logoutOthers()">Đăng xuất tất cả thiết bị KHÁC</button>
+  </div>
+  <div id="sessions-list"><p><em>Bấm "Tải lại danh sách" để xem.</em></p></div>
+  <p>Đăng xuất 1 thiết bị sẽ thu hồi refresh_token VÀ chặn ngay access_token (<code>jti</code>) của
+  thiết bị đó — "Kiểm tra trạng thái" của thiết bị đó chuyển sang 401 <code>TOKEN_REVOKED</code>
+  ngay lập tức, không phải đợi tối đa 15 phút. Riêng phiên tạo trước migration
+  <code>V20260808150000</code> thì vẫn theo hành vi cũ (không có <code>jti</code> lưu sẵn).</p>
+</details>
+
+<details open class="step">
+  <summary>7. Đổi mật khẩu (phải đang đăng nhập)</summary>
+  <p>Thu hồi TẤT CẢ phiên (kể cả phiên đang dùng) và xoá cookie — sau khi đổi xong phải đăng nhập lại.</p>
+  <div class="row">
+    <input id="change-old-password" placeholder="mật khẩu hiện tại" type="password" />
+    <input id="change-new-password" placeholder="mật khẩu mới (tối thiểu 8 ký tự)" type="password" />
+  </div>
+  <button onclick="changePassword()">Đổi mật khẩu</button>
+</details>
+
+<details open class="step">
+  <summary>8. Quên mật khẩu (chưa đăng nhập)</summary>
+  <p>3 bước. Bước 2 tự set cookie <code>reset_token</code> (HttpOnly, Path=/auth/password) — không
+  cần copy tay, bấm nút bước 3 ngay sau khi bước 2 thành công là được gửi kèm tự động. Hiện chỉ hỗ
+  trợ email (chưa có SMS).</p>
+  <div class="row">
+    <input id="forgot-email" placeholder="email" value="demo1@test.com" />
+    <button onclick="forgotPassword()">1. Gửi mã</button>
   </div>
   <div class="row">
-    <input id="submit-code" placeholder="code" />
-    <button onclick="submitTwoFactor()">Submit code</button>
+    <input id="forgot-verify-email" placeholder="email" value="demo1@test.com" />
+    <input id="forgot-verify-code" placeholder="mã nhận từ email" />
+    <button onclick="forgotPasswordVerify()">2. Xác thực mã</button>
   </div>
-</section>
-
-<section>
-  <h2>5. Logout (current device)</h2>
-  <p>Revokes this device's refresh_token + blacklists this exact access_token's <code>jti</code>
-  (immediate, precise revoke). Clears both cookies.</p>
-  <button onclick="logout()">Logout</button>
-</section>
-
-<section>
-  <h2>6. Logout 1 other device</h2>
-  <p>No "list sessions" endpoint exists yet, so find the id manually via SQL:
-  <code>SELECT id, device_name, ip_address, created_at FROM user_sessions WHERE user_id = '&lt;uuid&gt;' AND is_active = true;</code>
-  To actually have a 2nd active session to test against, log in from a separate incognito
-  window/browser first (this page reuses 1 cookie jar, so logging in again here just rotates
-  the same session).</p>
   <div class="row">
-    <input id="logout-session-id" placeholder="session id (UUID) — an OTHER device's session" />
-    <button onclick="logoutSession()">Logout this session</button>
+    <input id="reset-new-password" placeholder="mật khẩu mới (tối thiểu 8 ký tự)" type="password" />
+    <button onclick="resetPassword()">3. Đặt mật khẩu mới</button>
   </div>
-  <p>Note: that device's refresh_token is revoked immediately, but its access_token is NOT
-  blacklisted (Core Service doesn't track per-session <code>jti</code>) — it keeps working for
-  up to 15 more minutes until it expires naturally. Expected, not a bug — see AuthService#logoutSession.</p>
-</section>
+</details>
 
-<section>
-  <h2>7. Logout all devices</h2>
-  <label><input type="checkbox" id="logout-all-keep-current" /> keep current device logged in (logout-others)</label>
-  <button onclick="logoutAll()">Logout all</button>
-  <p>Unchecked = revokes every session including this one (<code>cache:jwt_revoked_before</code>
-  set, blocks every access_token instantly, clears cookies here too). Checked = every OTHER
-  session is revoked, this device's access_token stays valid untouched.</p>
-</section>
+<details open class="step">
+  <summary>9. Đăng xuất tất cả thiết bị</summary>
+  <label><input type="checkbox" id="logout-all-keep-current" /> giữ lại thiết bị hiện tại (chỉ đăng xuất các thiết bị khác)</label>
+  <button onclick="logoutAll()">Đăng xuất tất cả</button>
+  <p>Bỏ tick = thu hồi mọi phiên kể cả phiên hiện tại (set <code>cache:jwt_revoked_before</code>,
+  chặn ngay mọi access_token, xoá cookie ở đây luôn). Tick vào = chỉ thu hồi các phiên KHÁC, access_token
+  của thiết bị này vẫn còn dùng được bình thường.</p>
+</details>
 
-<section>
-  <h2>8. Check auth status (probe)</h2>
-  <p>No dedicated "whoami" endpoint yet — this calls <code>POST /2fa/totp/setup</code> purely as
-  a cheap authenticated probe (harmless side effect: only writes a pending secret to Redis, not
-  the DB). <b>200</b> = this device is still authenticated. <b>401 TOKEN_EXPIRED/TOKEN_REVOKED</b>
-  = logged out — use this right after sections 5/6/7 to confirm the logout actually took effect.</p>
-  <button onclick="checkAuth()">Check auth status</button>
-</section>
+<details open class="step">
+  <summary>10. Kiểm tra trạng thái đăng nhập</summary>
+  <p>Chưa có endpoint "whoami" riêng — nút này gọi tạm <code>POST /2fa/totp/setup</code> làm phép
+  thử vì nó cần access_token hợp lệ (tác dụng phụ vô hại: chỉ ghi 1 secret tạm vào Redis, không đụng
+  DB). <b>200</b> = thiết bị này vẫn còn đăng nhập. <b>401 TOKEN_EXPIRED/TOKEN_REVOKED</b> = đã bị
+  đăng xuất — dùng ngay sau bước 5/6/7/9 để xác nhận đăng xuất có thật sự có hiệu lực không.</p>
+  <button onclick="checkAuth()">Kiểm tra trạng thái</button>
+</details>
 
-<section>
-  <h2>Response log</h2>
-  <pre id="log">(nothing yet)</pre>
+<section id="log-section">
+  <h2>Kết quả</h2>
+  <pre id="log">(chưa có gì)</pre>
 </section>
 
 <script>
@@ -148,12 +216,15 @@ async function call(method, path, body) {
   });
   let data;
   try { data = await res.json(); } catch { data = null; }
-  log(`${method} ${path} -> ${res.status}\n${JSON.stringify(data, null, 2)}`);
+  log(`${method} ${path} -> ${res.status}\n${JSON.stringify(data, null, 2)}`, res.ok);
   return data;
 }
 
-function log(text) {
-  document.getElementById('log').textContent = text;
+function log(text, ok) {
+  const el = document.getElementById('log');
+  el.textContent = text;
+  el.classList.remove('ok', 'err');
+  if (ok !== undefined) el.classList.add(ok ? 'ok' : 'err');
 }
 
 function register() {
@@ -178,7 +249,7 @@ async function totpSetup() {
     document.getElementById('totp-setup-result').innerHTML =
       `<p>secret: <code>${data.data.secret}</code></p>` +
       `<p>otpauth_uri: <code>${data.data.otpauth_uri}</code></p>` +
-      `<p>Run: <code>oathtool --totp -b ${data.data.secret}</code> to get a code.</p>`;
+      `<p>Chạy lệnh: <code>oathtool --totp -b ${data.data.secret}</code> để lấy mã.</p>`;
     const qr = qrcode(0, 'M');
     qr.addData(data.data.otpauth_uri);
     qr.make();
@@ -186,20 +257,36 @@ async function totpSetup() {
   }
 }
 
-function totpConfirm() {
-  return call('POST', '/2fa/totp/confirm', { code: val('totp-confirm-code') });
+async function totpConfirm() {
+  const data = await call('POST', '/2fa/totp/confirm', { code: val('totp-confirm-code') });
+  showBackupCodes(data);
 }
 
 function emailSetup() {
   return call('POST', '/2fa/email/setup', null);
 }
 
-function emailConfirm() {
-  return call('POST', '/2fa/email/confirm', { code: val('email-confirm-code') });
+async function emailConfirm() {
+  const data = await call('POST', '/2fa/email/confirm', { code: val('email-confirm-code') });
+  showBackupCodes(data);
 }
 
 function disableMethod() {
   return call('DELETE', '/2fa/' + val('disable-method'), { password: val('disable-password') });
+}
+
+async function regenerateBackupCodes() {
+  const data = await call('POST', '/2fa/backup-codes/regenerate', { password: val('regen-backup-password') });
+  showBackupCodes(data);
+}
+
+/** codes chỉ trả về ĐÚNG 1 LẦN lúc bật method 2FA đầu tiên hoặc lúc regenerate — server không
+ *  lưu lại plaintext (chỉ lưu hash), nên đây là cơ hội duy nhất để xem/lưu lại. */
+function showBackupCodes(data) {
+  const codes = data && data.data && data.data.backup_codes;
+  const el = document.getElementById('backup-codes-display');
+  if (!codes || codes.length === 0) return;
+  el.innerHTML = '<p><b>Lưu lại ngay — chỉ hiện 1 lần:</b></p><pre>' + codes.join('\n') + '</pre>';
 }
 
 function challenge() {
@@ -214,8 +301,67 @@ function logout() {
   return call('POST', '/auth/logout', null);
 }
 
-function logoutSession() {
-  return call('DELETE', '/auth/sessions/' + val('logout-session-id'), null);
+async function listSessions() {
+  const data = await call('GET', '/auth/sessions', null);
+  const container = document.getElementById('sessions-list');
+  const sessions = data && data.data;
+  if (!sessions || sessions.length === 0) {
+    container.innerHTML = '<p><em>Không có phiên nào đang hoạt động (bạn đã đăng nhập chưa?).</em></p>';
+    return;
+  }
+  const rows = sessions.map(s => `
+    <tr class="${s.is_current ? 'current' : ''}">
+      <td>${s.device_name || s.platform || '(không rõ thiết bị)'}</td>
+      <td>${s.ip_address || '-'}</td>
+      <td>${[s.login_city, s.login_country].filter(Boolean).join(', ') || '-'}</td>
+      <td>${fmtTime(s.last_active_at)}</td>
+      <td>${fmtTime(s.created_at)}</td>
+      <td>${s.is_current
+        ? '<em>thiết bị này</em>'
+        : `<button class="danger" onclick="logoutSessionId('${s.id}')">Đăng xuất</button>`}</td>
+    </tr>`).join('');
+  container.innerHTML = `
+    <table class="sessions">
+      <thead><tr><th>Thiết bị</th><th>IP</th><th>Vị trí</th><th>Hoạt động cuối</th><th>Ngày tạo</th><th></th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+async function logoutSessionId(sessionId) {
+  await call('DELETE', '/auth/sessions/' + sessionId, null);
+  listSessions();
+}
+
+async function logoutOthers() {
+  await call('POST', '/auth/logout-all?keep_current=true', null);
+  listSessions();
+}
+
+function fmtTime(iso) {
+  if (!iso) return '-';
+  return new Date(iso).toLocaleString('vi-VN');
+}
+
+function changePassword() {
+  return call('PUT', '/auth/password', {
+    old_password: val('change-old-password'),
+    new_password: val('change-new-password'),
+  });
+}
+
+function forgotPassword() {
+  return call('POST', '/auth/password/forgot', { email: val('forgot-email') });
+}
+
+function forgotPasswordVerify() {
+  return call('POST', '/auth/password/forgot/verify', {
+    email: val('forgot-verify-email'),
+    code: val('forgot-verify-code'),
+  });
+}
+
+function resetPassword() {
+  return call('POST', '/auth/password/reset', { new_password: val('reset-new-password') });
 }
 
 function logoutAll() {

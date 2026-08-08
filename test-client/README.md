@@ -2,7 +2,13 @@
 
 Not a real frontend — just a single static page to manually exercise the auth/2FA flow built
 so far (register, login, TOTP/EMAIL setup, login-2FA challenge/submit, logout/logout-session/
-logout-all) through API Gateway. Delete/replace once a real frontend project exists.
+logout-all, change password, forgot password, session listing) through API Gateway.
+Delete/replace once a real frontend project exists.
+
+Each step is a collapsible `<details>` block — click the title bar to expand/collapse. The
+response log is pinned to the bottom of the page so you don't have to scroll after every click.
+The page UI itself (labels, buttons, section text) is in Vietnamese; this README stays in
+English like the rest of the repo's dev docs.
 
 ## Run
 
@@ -10,12 +16,18 @@ logout-all) through API Gateway. Delete/replace once a real frontend project exi
    dev ports documented in the root `README.md` (**Postgres 5433, Redis 6380** — not the
    defaults, deliberately changed to avoid clashing with services already on a dev machine).
 
-2. Core Service — needs the dev ports above, since its own defaults assume 5432/6379:
+2. Core Service — use `./scripts/run-service.sh core-service` (recommended) rather than a bare
+   `./mvnw spring-boot:run`: the script sources `.env.base` + `.env.dev` + `.env.dev.local` (in
+   that order) so mail credentials for the EMAIL 2FA / forgot-password flows get picked up
+   automatically. `.env.dev.local` is gitignored — put your own `MAIL_USERNAME`/`MAIL_PASSWORD`
+   (a Gmail App Password, not your normal password — https://myaccount.google.com/apppasswords)
+   there, never in `.env.dev` (that file IS tracked in git).
    ```
-   cd services/core-service
-   POSTGRES_PORT=5433 REDIS_PORT=6380 CORE_DB_PASSWORD=core_dev_pw ./mvnw spring-boot:run
+   cd D:\ChatApp
+   POSTGRES_PORT=5433 REDIS_PORT=6380 CORE_DB_PASSWORD=core_dev_pw ./scripts/run-service.sh core-service
    ```
-   (`CORE_DB_PASSWORD` value comes from `.env.dev` at repo root.)
+   If you skip mail setup entirely, everything except EMAIL 2FA and forgot-password still works
+   (TOTP 2FA needs no mail creds).
 
 3. API Gateway — same Redis port override, via its `APP_` env prefix:
    ```
@@ -34,21 +46,39 @@ logout-all) through API Gateway. Delete/replace once a real frontend project exi
 ## What it does
 
 Talks to API Gateway at `http://localhost:8080` with `fetch(..., { credentials: 'include' })`
-so the HttpOnly cookies (access_token/refresh_token/pre_auth_token) actually get stored and
-sent back by the browser, exactly like a real client would.
+so the HttpOnly cookies (access_token/refresh_token/pre_auth_token/reset_token) actually get
+stored and sent back by the browser, exactly like a real client would.
 
 ## Testing the logout flow
 
-- **Section 5 (logout current device)** and **section 8 (check auth status)** work standalone
+- **Section 5 (logout current device)** and **section 10 (check auth status)** work standalone
   in this single page — login, hit "Check auth status" (expect 200), hit "Logout", hit "Check
   auth status" again (expect 401).
-- **Section 6 (logout 1 other device)** and testing "logout-others" in **section 7** need a
-  *second* active session to revoke, which this page can't create by itself — it only holds 1
-  cookie jar. Log in from a separate incognito window (or a different browser) to create a 2nd
-  session, then find its `id` via `SELECT id, device_name, ip_address, created_at FROM
-  user_sessions WHERE user_id = '<uuid>' AND is_active = true;` and paste it into section 6.
-  There's no "list sessions" endpoint yet to fetch this from the API itself.
-- Section 6 and "logout-others" in section 7 revoke the target's refresh_token immediately, but
-  can't blacklist its access_token (Core Service has no per-session `jti`) — expect that other
-  device's "Check auth status" to keep returning 200 for up to 15 more minutes. This is the
-  documented tradeoff, not a bug.
+- **Section 6 (sessions)** lists every active session via `GET /auth/sessions` and lets you
+  logout any OTHER device — either 1 at a time (per-row button) or all at once (the "Đăng xuất
+  tất cả thiết bị KHÁC" button next to "Tải lại danh sách", which calls `POST
+  /auth/logout-all?keep_current=true` and refreshes the table). No more manual SQL lookups. To
+  actually have a 2nd session to test against, log in from a separate incognito window/browser
+  first (this page reuses 1 cookie jar, so logging in again here just rotates the same session).
+  The row for the device you're using right now is highlighted and has no logout button (use
+  section 5 for that).
+- Logging out 1 device from section 6 blacklists that device's access_token `jti` immediately
+  (session rows track `access_token_jti` since migration `V20260808150000`) — its "check auth
+  status" flips to 401 right away, not after up to 15 minutes. Bulk logout (section 6's "logout
+  others" button, or section 9 with "keep current device" checked) still only revokes
+  refresh_token for each other session at once — no immediate per-jti blacklist there since
+  it's not acting on 1 known session.
+
+## Testing forgot password (section 8)
+
+- Step 1 (`/auth/password/forgot`) always returns 200 whether or not the email is registered —
+  that's intentional (no account-enumeration), not a bug. Check the inbox of whatever email you
+  used — `OtpMailSender` sends a real email via `JavaMailSender`/SMTP (`MAIL_USERNAME`/
+  `MAIL_PASSWORD` in `.env.dev.local`, see "Run" step 2 above) for the actual 6-digit code, same
+  as the existing EMAIL 2FA method in section 3.
+- Step 2 sets a `reset_token` cookie scoped to `Path=/auth/password` — nothing to copy by hand,
+  just click step 3's button right after step 2 succeeds and the browser sends it automatically.
+- Step 3 clears the `reset_token` cookie and revokes every existing session for that account
+  (same as change password) — log in again with the new password afterward.
+- Phone/SMS isn't wired up yet (no SMS sender implemented anywhere in the service) — email only
+  for now.

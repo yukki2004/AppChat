@@ -39,7 +39,35 @@ public enum ErrorCode {
     RESET_TOKEN_INVALID(3003, "Invalid or expired reset token", HttpStatus.UNAUTHORIZED),
 
     // auth/login (POST /auth/login) — 5 consecutive wrong passwords -> 30 min lockout
-    ACCOUNT_TEMP_LOCKED(3004, "Too many failed login attempts — try again in 30 minutes", HttpStatus.TOO_MANY_REQUESTS);
+    ACCOUNT_TEMP_LOCKED(3004, "Too many failed login attempts — try again in 30 minutes", HttpStatus.TOO_MANY_REQUESTS),
+
+    // auth/register (POST /auth/register)
+    USERNAME_ALREADY_EXISTS(4001, "Username already exists", HttpStatus.CONFLICT),
+    EMAIL_ALREADY_EXISTS(4002, "Email is already registered", HttpStatus.CONFLICT),
+    PHONE_ALREADY_EXISTS(4003, "Phone number is already registered", HttpStatus.CONFLICT),
+
+    // auth/login + 2FA challenge/submit (POST /auth/login, /auth/login/2fa/challenge, /auth/login/2fa)
+    INVALID_CREDENTIALS(4011, "Invalid username/email/phone or password", HttpStatus.UNAUTHORIZED),
+    ACCOUNT_BLOCKED(4012, "Account is blocked or deactivated", HttpStatus.UNAUTHORIZED),
+    PRE_AUTH_TOKEN_INVALID(4013, "Invalid or expired pre_auth_token", HttpStatus.UNAUTHORIZED),
+    TWO_FACTOR_CHALLENGE_NOT_STARTED(4014, "Call /auth/login/2fa/challenge first", HttpStatus.UNAUTHORIZED),
+    INVALID_BACKUP_CODE(4015, "Invalid backup code", HttpStatus.UNAUTHORIZED),
+    INVALID_TWO_FACTOR_CODE(4016, "Invalid verification code", HttpStatus.UNAUTHORIZED),
+    BACKUP_CODE_NOT_AVAILABLE(4017, "Backup codes are not available for this account", HttpStatus.BAD_REQUEST),
+
+    // auth/refresh + auth/sessions (POST /auth/refresh, DELETE /auth/sessions/{id})
+    MISSING_REFRESH_TOKEN(4021, "Missing refresh_token", HttpStatus.UNAUTHORIZED),
+    REFRESH_TOKEN_INVALID(4022, "Invalid or expired refresh_token", HttpStatus.UNAUTHORIZED),
+    SESSION_NOT_FOUND(4023, "Session not found or already revoked", HttpStatus.NOT_FOUND),
+
+    // twofactor/ settings (2FA setup/confirm/disable/backup-codes)
+    NO_PENDING_TOTP_SETUP(5001, "No pending TOTP setup — call /2fa/totp/setup first", HttpStatus.UNAUTHORIZED),
+    INVALID_PASSWORD(5002, "Invalid password", HttpStatus.UNAUTHORIZED),
+    TWO_FACTOR_METHOD_NOT_ENABLED(5003, "This 2FA method is not enabled for this account", HttpStatus.BAD_REQUEST),
+    TWO_FACTOR_METHOD_ALREADY_ENABLED(5004, "This 2FA method is already enabled for this account", HttpStatus.CONFLICT),
+
+    // twofactor/otp (shared OTP attempt lockout, e.g. email 2FA / password reset code)
+    OTP_LOCKED(6001, "Too many failed attempts — try again in a few minutes", HttpStatus.TOO_MANY_REQUESTS);
 
     int code;
     String message;

@@ -36,7 +36,8 @@ import com.chatapp.core.auth.result.TwoFactorChallengeResult;
 import com.chatapp.core.base.ApiResponse;
 import com.chatapp.core.base.UserResponse;
 import com.chatapp.core.base.constant.RedisKeys;
-import com.chatapp.core.exception.InvalidCredentialsException;
+import com.chatapp.core.exception.common.AppException;
+import com.chatapp.core.exception.common.ErrorCode;
 
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -233,7 +234,7 @@ public class AuthController {
 
     private void requirePreAuthToken(String preAuthToken) {
         if (preAuthToken == null || preAuthToken.isBlank()) {
-            throw new InvalidCredentialsException("Missing pre_auth_token");
+            throw new AppException(ErrorCode.PRE_AUTH_TOKEN_INVALID);
         }
     }
 

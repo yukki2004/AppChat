@@ -163,9 +163,13 @@ domain, nên tách riêng khỏi `auth/` (domain `auth/` gọi vào `security/`,
     mang `code` (int, chỉ dùng nội bộ/log, KHÔNG trả ra response), `message` (tiếng Anh), và
     `httpStatusCode`. `GlobalExceptionHandler` chỉ có đúng 1 `@ExceptionHandler(AppException.class)`
     xử lý chung, trả `ApiError.code = errorCode.name()` (String) — giữ đúng format response cũ.
-    Exception riêng từng class kiểu cũ (`DuplicateUserException`, `InvalidCredentialsException`...)
-    ở domain `auth/`/`twofactor/` KHÔNG bị bắt buộc migrate theo — giữ nguyên, chỉ áp dụng pattern
-    mới cho domain nào code MỚI từ giờ trở đi (đã áp dụng cho `friend/`, xem #19/#20).
+    Exception riêng từng class kiểu cũ (`DuplicateUserException`, `InvalidCredentialsException`,
+    `TwoFactorMethodNotEnabledException`, `TwoFactorMethodAlreadyEnabledException`,
+    `OtpLockedException`, `SessionNotFoundException`, `RefreshTokenInvalidException`) ở domain
+    `auth/`/`twofactor/` đã được migrate hết sang `AppException(ErrorCode.XXX)` — không còn
+    exception riêng từng class nào trong 2 domain này nữa (đã áp dụng cho `friend/`, xem #19/#20,
+    rồi tới `auth/`/`twofactor/`). Toàn bộ lỗi nghiệp vụ mới, bất kể domain nào, dùng đúng 1
+    pattern `AppException(ErrorCode.XXX)` — không tạo lại class exception riêng theo domain nữa.
     Race condition khi insert entity có `@Id @GeneratedValue` sinh UUID trong bộ nhớ (không cần
     round-trip DB): `save()` KHÔNG insert ngay, Hibernate hoãn tới lúc flush — muốn bắt
     `DataIntegrityViolationException` ngay tại chỗ (VD: unique index chặn race condition) PHẢI

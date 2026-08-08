@@ -17,7 +17,8 @@ import com.chatapp.core.base.constant.RedisKeys;
 import com.chatapp.core.base.entity.OtpCodeEntity;
 import com.chatapp.core.base.repository.OtpCodeRepository;
 import com.chatapp.core.base.util.HashUtils;
-import com.chatapp.core.exception.OtpLockedException;
+import com.chatapp.core.exception.common.AppException;
+import com.chatapp.core.exception.common.ErrorCode;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -42,8 +43,7 @@ public class OtpCodeService {
         log.debug("otp generate start target={} purpose={} userId={}", target, purpose, userId);
         if (isLocked(target, purpose)) {
             log.warn("otp generate rejected target={} purpose={} reason=LOCKED_OUT", target, purpose);
-            throw new OtpLockedException(
-                    "Too many failed attempts — try again in a few minutes");
+            throw new AppException(ErrorCode.OTP_LOCKED);
         }
 
         List<OtpCodeEntity> stale = otpCodeRepository.findByTargetAndPurposeAndUserIdAndUsedAtIsNull(target, purpose, userId);
@@ -67,8 +67,7 @@ public class OtpCodeService {
         log.debug("otp verify start target={} purpose={} userId={}", target, purpose, userId);
         if (isLocked(target, purpose)) {
             log.warn("otp verify rejected target={} purpose={} reason=LOCKED_OUT", target, purpose);
-            throw new OtpLockedException(
-                    "Too many failed attempts — try again in a few minutes");
+            throw new AppException(ErrorCode.OTP_LOCKED);
         }
 
         Optional<OtpCodeEntity> found = otpCodeRepository

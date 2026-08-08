@@ -20,9 +20,8 @@ import com.chatapp.core.base.entity.TwoFactorMethodEntity;
 import com.chatapp.core.base.entity.UserEntity;
 import com.chatapp.core.base.repository.TwoFactorMethodRepository;
 import com.chatapp.core.base.repository.UserRepository;
-import com.chatapp.core.exception.InvalidCredentialsException;
-import com.chatapp.core.exception.TwoFactorMethodAlreadyEnabledException;
-import com.chatapp.core.exception.TwoFactorMethodNotEnabledException;
+import com.chatapp.core.exception.common.AppException;
+import com.chatapp.core.exception.common.ErrorCode;
 import com.chatapp.core.twofactor.backupcode.TwoFactorBackupCodeService;
 import com.chatapp.core.twofactor.dto.response.BackupCodesResponse;
 import com.chatapp.core.twofactor.dto.response.TotpSetupResponse;
@@ -79,11 +78,11 @@ public class TwoFactorSettingsService {
         String pendingKey = RedisKeys.pendingTotpSecret(userId);
         String base32Secret = redisTemplate.opsForValue().get(pendingKey);
         if (base32Secret == null) {
-            throw new InvalidCredentialsException("No pending TOTP setup — call /2fa/totp/setup first");
+            throw new AppException(ErrorCode.NO_PENDING_TOTP_SETUP);
         }
 
         if (!totpCodeVerifier.verify(base32Secret, code)) {
-            throw new InvalidCredentialsException("Invalid verification code");
+            throw new AppException(ErrorCode.INVALID_TWO_FACTOR_CODE);
         }
 
         twoFactorMethodRepository.save(
@@ -110,7 +109,7 @@ public class TwoFactorSettingsService {
         requireNotAlreadyEnabled(userId, TwoFactorMethod.EMAIL);
 
         if (!otpCodeService.verify(user.getEmail(), OtpPurpose.ENABLE_2FA, userId, code)) {
-            throw new InvalidCredentialsException("Invalid verification code");
+            throw new AppException(ErrorCode.INVALID_TWO_FACTOR_CODE);
         }
 
         twoFactorMethodRepository.save(new TwoFactorMethodEntity(userId, TwoFactorMethod.EMAIL, null));
@@ -127,10 +126,10 @@ public class TwoFactorSettingsService {
         UserEntity user = requireUser(userId);
 
         if (user.getPasswordHash() == null || !passwordEncoder.matches(password, user.getPasswordHash())) {
-            throw new InvalidCredentialsException("Invalid password");
+            throw new AppException(ErrorCode.INVALID_PASSWORD);
         }
         if (twoFactorMethodRepository.findByUserId(userId).isEmpty()) {
-            throw new TwoFactorMethodNotEnabledException("No 2FA method is enabled for this account");
+            throw new AppException(ErrorCode.TWO_FACTOR_METHOD_NOT_ENABLED);
         }
 
         return new BackupCodesResponse(twoFactorBackupCodeService.regenerate(userId));
@@ -141,14 +140,14 @@ public class TwoFactorSettingsService {
         UserEntity user = requireUser(userId);
 
         if (user.getPasswordHash() == null || !passwordEncoder.matches(password, user.getPasswordHash())) {
-            throw new InvalidCredentialsException("Invalid password");
+            throw new AppException(ErrorCode.INVALID_PASSWORD);
         }
 
         TwoFactorMethod method = parseMethod(methodName);
         TwoFactorMethodEntity entity = twoFactorMethodRepository.findByUserId(userId).stream()
                 .filter(m -> m.getMethod() == method)
                 .findFirst()
-                .orElseThrow(() -> new TwoFactorMethodNotEnabledException(method + " is not enabled for this account"));
+                .orElseThrow(() -> new AppException(ErrorCode.TWO_FACTOR_METHOD_NOT_ENABLED));
 
         twoFactorMethodRepository.delete(entity);
         // TODO: publish a user.two_factor_disabled security alert (RoutingKeys.UserExchange)
@@ -161,7 +160,7 @@ public class TwoFactorSettingsService {
         try {
             return TwoFactorMethod.valueOf(methodName);
         } catch (IllegalArgumentException e) {
-            throw new TwoFactorMethodNotEnabledException("Unknown 2FA method: " + methodName);
+            throw new AppException(ErrorCode.TWO_FACTOR_METHOD_NOT_ENABLED);
         }
     }
 
@@ -173,14 +172,14 @@ public class TwoFactorSettingsService {
 
     private UserEntity requireUser(UUID userId) {
         return userRepository.findById(userId)
-                .orElseThrow(() -> new InvalidCredentialsException("User not found"));
+                .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_FOUND));
     }
 
     private void requireNotAlreadyEnabled(UUID userId, TwoFactorMethod method) {
         boolean alreadyEnabled = twoFactorMethodRepository.findByUserId(userId).stream()
                 .anyMatch(m -> m.getMethod() == method);
         if (alreadyEnabled) {
-            throw new TwoFactorMethodAlreadyEnabledException(method + " is already enabled for this account");
+            throw new AppException(ErrorCode.TWO_FACTOR_METHOD_ALREADY_ENABLED);
         }
     }
 }

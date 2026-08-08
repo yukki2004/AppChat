@@ -34,11 +34,6 @@ import com.chatapp.core.base.entity.UserSessionEntity;
 import com.chatapp.core.base.repository.TwoFactorMethodRepository;
 import com.chatapp.core.base.repository.UserRepository;
 import com.chatapp.core.base.repository.UserSessionRepository;
-import com.chatapp.core.exception.DuplicateUserException;
-import com.chatapp.core.exception.InvalidCredentialsException;
-import com.chatapp.core.exception.RefreshTokenInvalidException;
-import com.chatapp.core.exception.SessionNotFoundException;
-import com.chatapp.core.exception.TwoFactorMethodNotEnabledException;
 import com.chatapp.core.exception.common.AppException;
 import com.chatapp.core.exception.common.ErrorCode;
 import com.chatapp.core.geoip.GeoIpService;
@@ -92,15 +87,15 @@ public class AuthServiceImpl implements AuthService {
 
         if (userRepository.existsByUsername(request.getUsername())) {
             log.warn("register rejected username={} reason=USERNAME_TAKEN", request.getUsername());
-            throw new DuplicateUserException("Username already exists");
+            throw new AppException(ErrorCode.USERNAME_ALREADY_EXISTS);
         }
         if (request.getEmail() != null && userRepository.existsByEmail(request.getEmail())) {
             log.warn("register rejected username={} reason=EMAIL_TAKEN", request.getUsername());
-            throw new DuplicateUserException("Email is already registered");
+            throw new AppException(ErrorCode.EMAIL_ALREADY_EXISTS);
         }
         if (request.getPhone() != null && userRepository.existsByPhone(request.getPhone())) {
             log.warn("register rejected username={} reason=PHONE_TAKEN", request.getUsername());
-            throw new DuplicateUserException("Phone number is already registered");
+            throw new AppException(ErrorCode.PHONE_ALREADY_EXISTS);
         }
 
         String passwordHash = passwordEncoder.encode(request.getPassword());
@@ -122,7 +117,7 @@ public class AuthServiceImpl implements AuthService {
             log.warn("login failed identifier={} reason=UNKNOWN_IDENTIFIER", request.getIdentifier());
             loginAuditLogService.record(null, LoginAuditEventType.LOGIN_FAILED, ipAddress, userAgent,
                     null, null, "UNKNOWN_IDENTIFIER");
-            throw new InvalidCredentialsException("Invalid username/email/phone or password");
+            throw new AppException(ErrorCode.INVALID_CREDENTIALS);
         }
         UserEntity user = foundUser.get();
 
@@ -145,7 +140,7 @@ public class AuthServiceImpl implements AuthService {
             }
             loginAuditLogService.record(user.getId(), LoginAuditEventType.LOGIN_FAILED, ipAddress, userAgent,
                     null, null, "WRONG_PASSWORD");
-            throw new InvalidCredentialsException("Invalid username/email/phone or password");
+            throw new AppException(ErrorCode.INVALID_CREDENTIALS);
         }
         resetFailedLoginAttempts(user.getId());
 
@@ -153,7 +148,7 @@ public class AuthServiceImpl implements AuthService {
             log.warn("login failed userId={} reason=ACCOUNT_BLOCKED", user.getId());
             loginAuditLogService.record(user.getId(), LoginAuditEventType.LOGIN_FAILED, ipAddress, userAgent,
                     null, null, "ACCOUNT_BLOCKED");
-            throw new InvalidCredentialsException("Account is blocked or deactivated");
+            throw new AppException(ErrorCode.ACCOUNT_BLOCKED);
         }
 
         List<TwoFactorMethodEntity> twoFactorMethods = twoFactorMethodRepository.findByUserId(user.getId());
@@ -176,11 +171,11 @@ public class AuthServiceImpl implements AuthService {
     public TwoFactorChallengeAckResponse challengeTwoFactor(String preAuthToken, String methodName) {
         log.debug("challengeTwoFactor start method={}", methodName);
         UUID userId = preAuthTokenService.getUserId(preAuthToken)
-                .orElseThrow(() -> new InvalidCredentialsException("Invalid or expired pre_auth_token"));
+                .orElseThrow(() -> new AppException(ErrorCode.PRE_AUTH_TOKEN_INVALID));
 
         if (BACKUP_CODE_METHOD.equals(methodName)) {
             if (!twoFactorBackupCodeService.hasBackupCodes(userId)) {
-                throw new TwoFactorMethodNotEnabledException("Backup codes are not available for this account");
+                throw new AppException(ErrorCode.BACKUP_CODE_NOT_AVAILABLE);
             }
             preAuthTokenService.setMethod(preAuthToken, BACKUP_CODE_METHOD);
             return new TwoFactorChallengeAckResponse(BACKUP_CODE_METHOD, "Enter one of your backup codes");
@@ -191,10 +186,10 @@ public class AuthServiceImpl implements AuthService {
         TwoFactorMethodEntity config = twoFactorMethodRepository.findByUserId(userId).stream()
                 .filter(m -> m.getMethod() == method)
                 .findFirst()
-                .orElseThrow(() -> new TwoFactorMethodNotEnabledException("Method " + method + " is not enabled for this account"));
+                .orElseThrow(() -> new AppException(ErrorCode.TWO_FACTOR_METHOD_NOT_ENABLED));
 
         UserEntity user = userRepository.findById(userId)
-                .orElseThrow(() -> new InvalidCredentialsException("Invalid or expired pre_auth_token"));
+                .orElseThrow(() -> new AppException(ErrorCode.PRE_AUTH_TOKEN_INVALID));
 
         twoFactorChallengeDispatcher.challenge(user, config);
         preAuthTokenService.setMethod(preAuthToken, method.name());
@@ -207,20 +202,20 @@ public class AuthServiceImpl implements AuthService {
     @Transactional
     public AuthResult verifyTwoFactor(String preAuthToken, String code, String ipAddress, String userAgent) {
         UUID userId = preAuthTokenService.getUserId(preAuthToken)
-                .orElseThrow(() -> new InvalidCredentialsException("Invalid or expired pre_auth_token"));
+                .orElseThrow(() -> new AppException(ErrorCode.PRE_AUTH_TOKEN_INVALID));
         String methodName = preAuthTokenService.getMethod(preAuthToken)
-                .orElseThrow(() -> new InvalidCredentialsException("Call /auth/login/2fa/challenge first"));
+                .orElseThrow(() -> new AppException(ErrorCode.TWO_FACTOR_CHALLENGE_NOT_STARTED));
         log.debug("verifyTwoFactor start userId={} method={}", userId, methodName);
 
         UserEntity user = userRepository.findById(userId)
-                .orElseThrow(() -> new InvalidCredentialsException("Invalid or expired pre_auth_token"));
+                .orElseThrow(() -> new AppException(ErrorCode.PRE_AUTH_TOKEN_INVALID));
 
         if (BACKUP_CODE_METHOD.equals(methodName)) {
             if (!twoFactorBackupCodeService.verify(userId, code)) {
                 log.warn("verifyTwoFactor failed userId={} method=BACKUP_CODE reason=INVALID_CODE", userId);
                 loginAuditLogService.record(userId, LoginAuditEventType.LOGIN_FAILED, ipAddress, userAgent,
                         null, null, "INVALID_BACKUP_CODE");
-                throw new InvalidCredentialsException("Invalid backup code");
+                throw new AppException(ErrorCode.INVALID_BACKUP_CODE);
             }
             preAuthTokenService.delete(preAuthToken);
             log.info("verifyTwoFactor success userId={} method=BACKUP_CODE", userId);
@@ -231,13 +226,13 @@ public class AuthServiceImpl implements AuthService {
         TwoFactorMethodEntity config = twoFactorMethodRepository.findByUserId(userId).stream()
                 .filter(m -> m.getMethod() == method)
                 .findFirst()
-                .orElseThrow(() -> new InvalidCredentialsException("Invalid or expired pre_auth_token"));
+                .orElseThrow(() -> new AppException(ErrorCode.PRE_AUTH_TOKEN_INVALID));
 
         if (!twoFactorChallengeDispatcher.verify(user, config, code)) {
             log.warn("verifyTwoFactor failed userId={} method={} reason=INVALID_CODE", userId, method);
             loginAuditLogService.record(userId, LoginAuditEventType.LOGIN_FAILED, ipAddress, userAgent,
                     null, null, "INVALID_2FA_CODE");
-            throw new InvalidCredentialsException("Invalid verification code");
+            throw new AppException(ErrorCode.INVALID_TWO_FACTOR_CODE);
         }
 
         preAuthTokenService.delete(preAuthToken);
@@ -250,7 +245,7 @@ public class AuthServiceImpl implements AuthService {
     public AuthResult refreshToken(String refreshToken, String ipAddress, String userAgent) {
         if (refreshToken == null || refreshToken.isBlank()) {
             log.warn("refreshToken rejected reason=MISSING_TOKEN");
-            throw new RefreshTokenInvalidException("Missing refresh_token");
+            throw new AppException(ErrorCode.MISSING_REFRESH_TOKEN);
         }
         String tokenHash = HashUtils.sha256Hex(refreshToken);
         Instant now = Instant.now();
@@ -262,13 +257,13 @@ public class AuthServiceImpl implements AuthService {
         if (session == null) {
             log.warn("refreshToken rejected reason=NOT_FOUND_OR_EXPIRED (checking for reuse)");
             detectReuseAndRevokeAll(tokenHash, now);
-            throw new RefreshTokenInvalidException("Invalid or expired refresh_token");
+            throw new AppException(ErrorCode.REFRESH_TOKEN_INVALID);
         }
 
         session.revoke(ROTATED_REVOKE_REASON);
 
         UserEntity user = userRepository.findById(session.getUserId())
-                .orElseThrow(() -> new RefreshTokenInvalidException("Invalid or expired refresh_token"));
+                .orElseThrow(() -> new AppException(ErrorCode.REFRESH_TOKEN_INVALID));
 
         log.info("refreshToken success userId={} oldSessionId={}", user.getId(), session.getId());
         return issueTokens(user, session, ipAddress, userAgent);
@@ -350,7 +345,7 @@ public class AuthServiceImpl implements AuthService {
     public void logoutSession(UUID userId, UUID sessionId, String ipAddress, String userAgent) {
         UserSessionEntity session = userSessionRepository
                 .findByIdAndUserIdAndIsActiveTrueAndExpiresAtAfter(sessionId, userId, Instant.now())
-                .orElseThrow(() -> new SessionNotFoundException("Session not found or already revoked"));
+                .orElseThrow(() -> new AppException(ErrorCode.SESSION_NOT_FOUND));
         session.revoke("USER_REVOKED_REMOTE");
 
         if (session.getAccessTokenJti() != null) {
@@ -533,7 +528,7 @@ public class AuthServiceImpl implements AuthService {
         try {
             return TwoFactorMethod.valueOf(methodName);
         } catch (IllegalArgumentException e) {
-            throw new TwoFactorMethodNotEnabledException("Unknown 2FA method: " + methodName);
+            throw new AppException(ErrorCode.TWO_FACTOR_METHOD_NOT_ENABLED);
         }
     }
 

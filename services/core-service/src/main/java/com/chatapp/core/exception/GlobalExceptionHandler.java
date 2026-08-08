@@ -14,48 +14,6 @@ import com.chatapp.core.base.ApiResponse;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
-    @ExceptionHandler(DuplicateUserException.class)
-    public ResponseEntity<ApiResponse<Void>> handleDuplicateUser(DuplicateUserException ex) {
-        return ResponseEntity.status(HttpStatus.CONFLICT)
-                .body(ApiResponse.fail("USER_ALREADY_EXISTS", ex.getMessage()));
-    }
-
-    @ExceptionHandler(InvalidCredentialsException.class)
-    public ResponseEntity<ApiResponse<Void>> handleInvalidCredentials(InvalidCredentialsException ex) {
-        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                .body(ApiResponse.fail("INVALID_CREDENTIALS", ex.getMessage()));
-    }
-
-    @ExceptionHandler(TwoFactorMethodNotEnabledException.class)
-    public ResponseEntity<ApiResponse<Void>> handleTwoFactorMethodNotEnabled(TwoFactorMethodNotEnabledException ex) {
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                .body(ApiResponse.fail("METHOD_NOT_ENABLED", ex.getMessage()));
-    }
-
-    @ExceptionHandler(TwoFactorMethodAlreadyEnabledException.class)
-    public ResponseEntity<ApiResponse<Void>> handleTwoFactorMethodAlreadyEnabled(TwoFactorMethodAlreadyEnabledException ex) {
-        return ResponseEntity.status(HttpStatus.CONFLICT)
-                .body(ApiResponse.fail("METHOD_ALREADY_ENABLED", ex.getMessage()));
-    }
-
-    @ExceptionHandler(SessionNotFoundException.class)
-    public ResponseEntity<ApiResponse<Void>> handleSessionNotFound(SessionNotFoundException ex) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                .body(ApiResponse.fail("SESSION_NOT_FOUND", ex.getMessage()));
-    }
-
-    @ExceptionHandler(RefreshTokenInvalidException.class)
-    public ResponseEntity<ApiResponse<Void>> handleRefreshTokenInvalid(RefreshTokenInvalidException ex) {
-        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                .body(ApiResponse.fail("REFRESH_TOKEN_INVALID", ex.getMessage()));
-    }
-
-    @ExceptionHandler(OtpLockedException.class)
-    public ResponseEntity<ApiResponse<Void>> handleOtpLocked(OtpLockedException ex) {
-        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
-                .body(ApiResponse.fail("OTP_LOCKED", ex.getMessage()));
-    }
-
     @ExceptionHandler(AppException.class)
     public ResponseEntity<ApiResponse<Void>> handleAppException(AppException ex) {
         ErrorCode errorCode = ex.getErrorCode();

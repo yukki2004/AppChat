@@ -98,8 +98,13 @@ chatapp-backend/
   tự bịa convention mới dù có vẻ hợp lý.
 - Trước khi thêm 1 lời gọi cross-service, đọc `skills/service-communication.md` để chọn đúng
   giao thức, không mặc định dùng REST/HTTP nội bộ giữa các service.
-- Trước khi thêm log cho request vào/ra, publish/consume RabbitMQ event, hoặc gọi gRPC, đọc
-  `skills/logging-conventions.md` — không tự bịa format log riêng cho từng service.
+- **Mọi handler nhận request (HTTP/WS/gRPC) và mọi hàm nghiệp vụ trong `*Service` (business
+  logic) PHẢI có log — đây là việc chủ động phải làm khi viết code mới, không phải chờ được
+  nhắc mới thêm.** Đọc `skills/logging-conventions.md` trước khi thêm (không tự bịa format log
+  riêng cho từng service) — tối thiểu 1 log lúc bắt đầu (`DEBUG`) và 1 log lúc kết thúc
+  (`INFO`/`WARN`/`ERROR` tuỳ kết quả), theo đúng field bắt buộc (`request_id`, `service`,
+  `timestamp`...) trong skill đó. Code cũ chưa có log không bắt buộc phải bổ sung ngay, nhưng
+  bất kỳ hàm nào bị sửa/thêm mới trong lượt code đó thì phải kèm log, không để dồn lại "làm sau".
 - Trước khi viết code verify `access_token` (JWT) hoặc code phát hành/xoay vòng key ở Core
   Service, đọc `skills/authentication.md` — không tự parse/verify JWT thủ công.
 - Nếu spec (`docs/ChatApp_Architecture_Spec.docx`) và code hiện tại mâu thuẫn nhau, hỏi lại

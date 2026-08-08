@@ -18,16 +18,12 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.chatapp.core.base.UserResponse;
-import com.chatapp.core.base.entity.FriendshipEntity;
 import com.chatapp.core.base.entity.UserBlockEntity;
 import com.chatapp.core.base.entity.UserEntity;
-import com.chatapp.core.base.repository.CloseFriendRepository;
-import com.chatapp.core.base.repository.FriendshipRepository;
 import com.chatapp.core.base.repository.UserBlockRepository;
 import com.chatapp.core.base.repository.UserRepository;
 import com.chatapp.core.exception.common.AppException;
 import com.chatapp.core.exception.common.ErrorCode;
-import com.chatapp.core.lock.PairLockService;
 
 @ExtendWith(MockitoExtension.class)
 class BlockServiceImplTest {
@@ -36,12 +32,6 @@ class BlockServiceImplTest {
     private UserRepository userRepository;
     @Mock
     private UserBlockRepository userBlockRepository;
-    @Mock
-    private FriendshipRepository friendshipRepository;
-    @Mock
-    private CloseFriendRepository closeFriendRepository;
-    @Mock
-    private PairLockService pairLockService;
 
     private BlockServiceImpl blockService;
 
@@ -50,8 +40,7 @@ class BlockServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        blockService = new BlockServiceImpl(
-                userRepository, userBlockRepository, friendshipRepository, closeFriendRepository, pairLockService);
+        blockService = new BlockServiceImpl(userRepository, userBlockRepository);
     }
 
     private UserEntity someUser() {
@@ -85,33 +74,15 @@ class BlockServiceImplTest {
         blockService.block(blockerId, blockedId, "spam");
 
         verify(userBlockRepository, never()).save(any());
-        verify(friendshipRepository, never()).findByUnorderedPair(any(), any());
     }
 
     @Test
-    void block_insertsRowAndCascadesFriendshipAndCloseFriends() {
-        FriendshipEntity friendship = new FriendshipEntity(blockerId, blockedId, "hi");
+    void block_savesRow() {
         when(userRepository.findByIdAndDeletedAtIsNull(blockedId)).thenReturn(Optional.of(someUser()));
         when(userBlockRepository.existsByBlockerIdAndBlockedId(blockerId, blockedId)).thenReturn(false);
-        when(friendshipRepository.findByUnorderedPair(blockerId, blockedId)).thenReturn(Optional.of(friendship));
 
         blockService.block(blockerId, blockedId, "harassment");
 
-        verify(userBlockRepository).save(any(UserBlockEntity.class));
-        verify(friendshipRepository).delete(friendship);
-        verify(closeFriendRepository).deleteById_UserIdAndId_FriendId(blockerId, blockedId);
-        verify(closeFriendRepository).deleteById_UserIdAndId_FriendId(blockedId, blockerId);
-    }
-
-    @Test
-    void block_skipsFriendshipDelete_whenNoneExists() {
-        when(userRepository.findByIdAndDeletedAtIsNull(blockedId)).thenReturn(Optional.of(someUser()));
-        when(userBlockRepository.existsByBlockerIdAndBlockedId(blockerId, blockedId)).thenReturn(false);
-        when(friendshipRepository.findByUnorderedPair(blockerId, blockedId)).thenReturn(Optional.empty());
-
-        blockService.block(blockerId, blockedId, null);
-
-        verify(friendshipRepository, never()).delete(any());
         verify(userBlockRepository).save(any(UserBlockEntity.class));
     }
 

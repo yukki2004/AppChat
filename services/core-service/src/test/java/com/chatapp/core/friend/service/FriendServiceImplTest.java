@@ -25,14 +25,12 @@ import com.chatapp.core.base.entity.FriendshipEntity;
 import com.chatapp.core.base.entity.UserEntity;
 import com.chatapp.core.base.repository.CloseFriendRepository;
 import com.chatapp.core.base.repository.FriendshipRepository;
-import com.chatapp.core.base.repository.UserBlockRepository;
 import com.chatapp.core.base.repository.UserRepository;
 import com.chatapp.core.exception.common.AppException;
 import com.chatapp.core.exception.common.ErrorCode;
 import com.chatapp.core.friend.dto.response.FriendQrTokenResponse;
 import com.chatapp.core.friend.dto.response.SendFriendRequestResponse;
 import com.chatapp.core.friend.util.FriendRequestResolver;
-import com.chatapp.core.lock.PairLockService;
 
 @ExtendWith(MockitoExtension.class)
 class FriendServiceImplTest {
@@ -42,11 +40,7 @@ class FriendServiceImplTest {
     @Mock
     private FriendshipRepository friendshipRepository;
     @Mock
-    private UserBlockRepository userBlockRepository;
-    @Mock
     private CloseFriendRepository closeFriendRepository;
-    @Mock
-    private PairLockService pairLockService;
     @Mock
     private FriendQrTokenService friendQrTokenService;
 
@@ -57,15 +51,11 @@ class FriendServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        // userBlockRepository is left unstubbed in most tests below — Mockito defaults an
-        // unstubbed boolean-returning method to false, which is exactly "not blocked".
         friendService = new FriendServiceImpl(
                 userRepository,
                 friendshipRepository,
-                userBlockRepository,
                 closeFriendRepository,
                 new FriendRequestResolver(friendshipRepository),
-                pairLockService,
                 friendQrTokenService);
     }
 
@@ -104,20 +94,6 @@ class FriendServiceImplTest {
         assertThrowsErrorCode(() -> friendService.sendRequest(requesterId, addresseeId, null),
                 ErrorCode.REQUESTER_NOT_FOUND);
         verify(userRepository, never()).findByIdAndDeletedAtIsNull(addresseeId);
-    }
-
-    @Test
-    void sendRequest_rejectsWhenEitherDirectionBlocked() {
-        // OR-2-chiều collapsed into 1 round-trip query now — the caller can't tell (and doesn't
-        // need to) which side actually blocked which.
-        when(userRepository.findByIdAndDeletedAtIsNull(requesterId)).thenReturn(Optional.of(someUser()));
-        when(userRepository.findByIdAndDeletedAtIsNull(addresseeId)).thenReturn(Optional.of(someUser()));
-        when(userBlockRepository.existsByBlockerIdAndBlockedIdOrBlockerIdAndBlockedId(
-                requesterId, addresseeId, addresseeId, requesterId)).thenReturn(true);
-
-        assertThrowsErrorCode(() -> friendService.sendRequest(requesterId, addresseeId, null),
-                ErrorCode.FRIEND_REQUEST_NOT_ALLOWED);
-        verify(friendshipRepository, never()).findByUnorderedPair(any(), any());
     }
 
     @Test

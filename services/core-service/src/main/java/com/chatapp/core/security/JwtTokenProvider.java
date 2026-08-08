@@ -32,14 +32,19 @@ public class JwtTokenProvider {
     private final JwtKeyManager keyManager;
     private final JwtProperties properties;
 
-    public String generateAccessToken(UUID userId) {
+    /** Returns the jti alongside the serialized token — callers that persist a session
+     *  (AuthServiceImpl#buildAuthResult) need it to enable immediate single-device revocation
+     *  later (logoutSession); it's otherwise thrown away once minted since it's already
+     *  embedded in the returned token itself. */
+    public IssuedAccessToken generateAccessToken(UUID userId) {
         try {
             Instant now = Instant.now();
             Instant expiresAt = now.plusSeconds(properties.getAccessTokenTtlSeconds());
+            String jti = UUID.randomUUID().toString();
 
             JWTClaimsSet claims = new JWTClaimsSet.Builder()
                     .subject(userId.toString())
-                    .jwtID(UUID.randomUUID().toString())
+                    .jwtID(jti)
                     .issueTime(Date.from(now))
                     .expirationTime(Date.from(expiresAt))
                     .build();
@@ -51,7 +56,7 @@ public class JwtTokenProvider {
             SignedJWT signedJwt = new SignedJWT(header, claims);
             signedJwt.sign(new RSASSASigner(keyManager.getSigningKey()));
 
-            return signedJwt.serialize();
+            return new IssuedAccessToken(signedJwt.serialize(), jti);
         } catch (JOSEException e) {
             throw new IllegalStateException("Failed to sign access token", e);
         }
@@ -83,5 +88,8 @@ public class JwtTokenProvider {
     }
 
     public record AccessTokenClaims(UUID userId, String jti, Instant expiresAt) {
+    }
+
+    public record IssuedAccessToken(String token, String jti) {
     }
 }

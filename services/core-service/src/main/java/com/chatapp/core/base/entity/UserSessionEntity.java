@@ -72,6 +72,14 @@ public class UserSessionEntity {
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
+    /** jti of the access_token issued alongside this session — lets logoutSession blacklist it
+     *  immediately instead of waiting for its natural expiry. Re-assigned every time this
+     *  session's tokens rotate (see AuthServiceImpl#buildAuthResult), so it always reflects
+     *  whichever access_token is currently live for this device. NULL for rows predating this
+     *  column (see V20260808150000). */
+    @Column(name = "access_token_jti", length = 36)
+    private String accessTokenJti;
+
     public UserSessionEntity(String tokenHash, UUID userId, String ipAddress, String userAgent,
                               String loginCountry, String loginCity, Instant expiresAt) {
         this(tokenHash, userId, null, null, null, ipAddress, userAgent, loginCountry, loginCity, expiresAt);
@@ -100,5 +108,9 @@ public class UserSessionEntity {
         this.isActive = false;
         this.revokedAt = Instant.now();
         this.revokeReason = reason;
+    }
+
+    public void assignAccessTokenJti(String jti) {
+        this.accessTokenJti = jti;
     }
 }

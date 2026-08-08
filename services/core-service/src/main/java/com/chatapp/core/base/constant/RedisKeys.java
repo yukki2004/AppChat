@@ -8,6 +8,7 @@ public final class RedisKeys {
 
     public static final long PRE_AUTH_TOKEN_TTL_SECONDS = 300;
     public static final long PENDING_TOTP_SECRET_TTL_SECONDS = 600;
+    public static final long RESET_PASSWORD_TOKEN_TTL_SECONDS = 600;
 
     public static String preAuth(String preAuthToken) {
         return "cache:pre_auth:" + preAuthToken;
@@ -43,6 +44,11 @@ public final class RedisKeys {
      *  disappear. See 05-cookie-auth-flow.md E.6. */
     public static String jwtRevokedBefore(UUID userId) {
         return "cache:jwt_revoked_before:" + userId;
+    }
+
+
+    public static String resetPasswordToken(String resetToken) {
+        return "cache:reset_password_token:" + resetToken;
     }
 
     private RedisKeys() {

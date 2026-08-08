@@ -256,8 +256,9 @@ verify, hoặc không trả field đó, KHÔNG được tự động link — ph
 | expires_at | TIMESTAMPTZ | NO | – | UTC – hết hạn (now + 30d) |
 | last_active_at | TIMESTAMPTZ | NO | now() | UTC – hoạt động cuối |
 | revoked_at | TIMESTAMPTZ | YES | NULL | UTC – bị thu hồi |
-| revoke_reason | VARCHAR(50) | YES | NULL | `USER_LOGOUT` / `USER_LOGOUT_ALL` / `USER_REVOKED_REMOTE` (đăng xuất 1 thiết bị khác) / `ROTATED` (refresh_token bị thay bằng token mới, xem `system/05-cookie-auth-flow.md` E.5) / `REFRESH_TOKEN_REUSE_DETECTED` (token đã `ROTATED` bị dùng lại — nghi bị đánh cắp, revoke toàn bộ session của user) |
+| revoke_reason | VARCHAR(50) | YES | NULL | `USER_LOGOUT` / `USER_LOGOUT_ALL` / `USER_REVOKED_REMOTE` (đăng xuất 1 thiết bị khác) / `ROTATED` (refresh_token bị thay bằng token mới, xem `system/05-cookie-auth-flow.md` E.5) / `REFRESH_TOKEN_REUSE_DETECTED` (token đã `ROTATED` bị dùng lại — nghi bị đánh cắp, revoke toàn bộ session của user) / `PASSWORD_CHANGED` (đổi mật khẩu hoặc reset qua quên mật khẩu — revoke toàn bộ session, xem chức năng #11-12) |
 | created_at | TIMESTAMPTZ | NO | now() | UTC |
+| access_token_jti | VARCHAR(36) | YES | NULL | `jti` của access_token đang sống ứng với session này — gán lại mỗi lần token xoay vòng (login/refresh). Cho phép `DELETE /auth/sessions/{sessionId}` blacklist ngay access_token của thiết bị đó (`cache:jwt_blacklist:{jti}`) thay vì đợi hết hạn tự nhiên (tối đa 15 phút). NULL với các dòng tạo trước migration `V20260808150000`. |
 
 ### **ð otp_codes  [PostgreSQL]**
 

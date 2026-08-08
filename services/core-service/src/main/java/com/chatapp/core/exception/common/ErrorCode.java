@@ -31,7 +31,12 @@ public enum ErrorCode {
     SELF_BLOCK_NOT_ALLOWED(2012, "You cannot block yourself", HttpStatus.BAD_REQUEST),
 
     // friend/#26 (POST/DELETE /friends/close/{userId})
-    SELF_CLOSE_FRIEND_NOT_ALLOWED(2013, "You cannot add yourself as a close friend", HttpStatus.BAD_REQUEST);
+    SELF_CLOSE_FRIEND_NOT_ALLOWED(2013, "You cannot add yourself as a close friend", HttpStatus.BAD_REQUEST),
+
+    // auth/password #11-12 (PUT /auth/password, POST /auth/password/forgot/verify, /auth/password/reset)
+    INVALID_OLD_PASSWORD(3001, "Current password is incorrect", HttpStatus.BAD_REQUEST),
+    PASSWORD_RESET_CODE_INVALID(3002, "Invalid or expired code", HttpStatus.BAD_REQUEST),
+    RESET_TOKEN_INVALID(3003, "Invalid or expired reset token", HttpStatus.UNAUTHORIZED);
 
     int code;
     String message;

@@ -1,5 +1,6 @@
 package com.chatapp.core.auth.controller;
 
+import java.util.List;
 import java.util.UUID;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -8,18 +9,25 @@ import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.chatapp.core.auth.AuthService;
+import com.chatapp.core.auth.dto.request.ChangePasswordRequest;
+import com.chatapp.core.auth.dto.request.ForgotPasswordRequest;
+import com.chatapp.core.auth.dto.request.ForgotPasswordVerifyRequest;
 import com.chatapp.core.auth.dto.request.LoginRequest;
 import com.chatapp.core.auth.dto.request.RegisterRequest;
+import com.chatapp.core.auth.dto.request.ResetPasswordRequest;
 import com.chatapp.core.auth.dto.request.TwoFactorChallengeRequest;
 import com.chatapp.core.auth.dto.request.TwoFactorSubmitRequest;
+import com.chatapp.core.auth.dto.response.SessionResponse;
 import com.chatapp.core.auth.dto.response.TwoFactorChallengeAckResponse;
 import com.chatapp.core.auth.dto.response.TwoFactorRequiredResponse;
 import com.chatapp.core.auth.result.AuthResult;
@@ -27,6 +35,7 @@ import com.chatapp.core.auth.result.LoginOutcome;
 import com.chatapp.core.auth.result.TwoFactorChallengeResult;
 import com.chatapp.core.base.ApiResponse;
 import com.chatapp.core.base.UserResponse;
+import com.chatapp.core.base.constant.RedisKeys;
 import com.chatapp.core.exception.InvalidCredentialsException;
 
 import jakarta.validation.Valid;
@@ -52,6 +61,9 @@ public class AuthController {
      *  logout, and logout-all all at once while still being HttpOnly and never reaching
      *  non-auth endpoints. */
     private static final String REFRESH_COOKIE_PATH = "/auth";
+
+    private static final String RESET_TOKEN_COOKIE_NAME = "reset_token";
+    private static final String RESET_TOKEN_COOKIE_PATH = "/auth/password";
 
     private final AuthService authService;
 
@@ -136,6 +148,18 @@ public class AuthController {
                 .body(ApiResponse.ok());
     }
 
+    /** Lists every active session for the caller — used by the client to render a device list
+     *  and know which sessionId to pass to DELETE /auth/sessions/{sessionId}, instead of
+     *  requiring a manual DB lookup. `is_current` is computed by comparing this request's own
+     *  refresh_token cookie against each session's token_hash, not by any explicit session id
+     *  the client sends. */
+    @GetMapping("/auth/sessions")
+    public ResponseEntity<ApiResponse<List<SessionResponse>>> listSessions(
+            @RequestHeader("X-User-Id") UUID userId,
+            @CookieValue(name = "refresh_token", required = false) String refreshToken) {
+        return ResponseEntity.ok(ApiResponse.ok(authService.listSessions(userId, refreshToken)));
+    }
+
     /** Logs out 1 OTHER device — see AuthService#logoutSession for why its access_token can't
      *  be blacklisted immediately here. */
     @DeleteMapping("/auth/sessions/{sessionId}")
@@ -162,6 +186,48 @@ public class AuthController {
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, buildCookie("access_token", "", "/", 0).toString())
                 .header(HttpHeaders.SET_COOKIE, buildCookie("refresh_token", "", REFRESH_COOKIE_PATH, 0).toString())
+                .body(ApiResponse.ok());
+    }
+
+
+    @PutMapping("/auth/password")
+    public ResponseEntity<ApiResponse<Void>> changePassword(
+            @RequestHeader("X-User-Id") UUID userId,
+            @Valid @RequestBody ChangePasswordRequest request,
+            @RequestHeader(value = "User-Agent", required = false) String userAgent,
+            @RequestHeader(value = "X-Client-IP", required = false) String clientIp) {
+        authService.changePassword(userId, request.getOldPassword(), request.getNewPassword(), clientIp, userAgent);
+        return ResponseEntity.ok()
+                .header(HttpHeaders.SET_COOKIE, buildCookie("access_token", "", "/", 0).toString())
+                .header(HttpHeaders.SET_COOKIE, buildCookie("refresh_token", "", REFRESH_COOKIE_PATH, 0).toString())
+                .body(ApiResponse.ok());
+    }
+
+    @PostMapping("/auth/password/forgot")
+    public ResponseEntity<ApiResponse<Void>> forgotPassword(@Valid @RequestBody ForgotPasswordRequest request) {
+        authService.forgotPassword(request.getEmail());
+        return ResponseEntity.ok(ApiResponse.ok());
+    }
+
+
+    @PostMapping("/auth/password/forgot/verify")
+    public ResponseEntity<ApiResponse<Void>> verifyForgotPassword(@Valid @RequestBody ForgotPasswordVerifyRequest request) {
+        String resetToken = authService.verifyPasswordResetOtp(request.getEmail(), request.getCode());
+        ResponseCookie cookie = buildCookie(
+                RESET_TOKEN_COOKIE_NAME, resetToken, RESET_TOKEN_COOKIE_PATH, RedisKeys.RESET_PASSWORD_TOKEN_TTL_SECONDS);
+        return ResponseEntity.ok()
+                .header(HttpHeaders.SET_COOKIE, cookie.toString())
+                .body(ApiResponse.ok());
+    }
+
+    @PostMapping("/auth/password/reset")
+    public ResponseEntity<ApiResponse<Void>> resetPassword(
+            @CookieValue(name = RESET_TOKEN_COOKIE_NAME, required = false) String resetToken,
+            @Valid @RequestBody ResetPasswordRequest request) {
+        authService.resetPassword(resetToken, request.getNewPassword());
+        ResponseCookie clearResetToken = buildCookie(RESET_TOKEN_COOKIE_NAME, "", RESET_TOKEN_COOKIE_PATH, 0);
+        return ResponseEntity.ok()
+                .header(HttpHeaders.SET_COOKIE, clearResetToken.toString())
                 .body(ApiResponse.ok());
     }
 

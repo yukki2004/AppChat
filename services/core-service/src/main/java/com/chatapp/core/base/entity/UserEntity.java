@@ -105,4 +105,8 @@ public class UserEntity {
     public void recordLogin() {
         this.lastLoginAt = Instant.now();
     }
+
+    public void changePassword(String newPasswordHash) {
+        this.passwordHash = newPasswordHash;
+    }
 }

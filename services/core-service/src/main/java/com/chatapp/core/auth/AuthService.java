@@ -1,9 +1,11 @@
 package com.chatapp.core.auth;
 
+import java.util.List;
 import java.util.UUID;
 
 import com.chatapp.core.auth.dto.request.LoginRequest;
 import com.chatapp.core.auth.dto.request.RegisterRequest;
+import com.chatapp.core.auth.dto.response.SessionResponse;
 import com.chatapp.core.auth.dto.response.TwoFactorChallengeAckResponse;
 import com.chatapp.core.auth.result.AuthResult;
 import com.chatapp.core.auth.result.LoginOutcome;
@@ -23,7 +25,17 @@ public interface AuthService {
 
     void logout(String refreshToken, String accessToken, String ipAddress, String userAgent);
 
+    List<SessionResponse> listSessions(UUID userId, String currentRefreshToken);
+
     void logoutSession(UUID userId, UUID sessionId, String ipAddress, String userAgent);
 
     void logoutAll(UUID userId, String currentRefreshToken, boolean keepCurrent, String ipAddress, String userAgent);
+
+    void changePassword(UUID userId, String oldPassword, String newPassword, String ipAddress, String userAgent);
+
+    void forgotPassword(String email);
+
+    String verifyPasswordResetOtp(String email, String code);
+
+    void resetPassword(String resetToken, String newPassword);
 }

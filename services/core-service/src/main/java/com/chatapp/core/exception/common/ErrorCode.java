@@ -36,7 +36,10 @@ public enum ErrorCode {
     // auth/password #11-12 (PUT /auth/password, POST /auth/password/forgot/verify, /auth/password/reset)
     INVALID_OLD_PASSWORD(3001, "Current password is incorrect", HttpStatus.BAD_REQUEST),
     PASSWORD_RESET_CODE_INVALID(3002, "Invalid or expired code", HttpStatus.BAD_REQUEST),
-    RESET_TOKEN_INVALID(3003, "Invalid or expired reset token", HttpStatus.UNAUTHORIZED);
+    RESET_TOKEN_INVALID(3003, "Invalid or expired reset token", HttpStatus.UNAUTHORIZED),
+
+    // auth/login (POST /auth/login) — 5 consecutive wrong passwords -> 30 min lockout
+    ACCOUNT_TEMP_LOCKED(3004, "Too many failed login attempts — try again in 30 minutes", HttpStatus.TOO_MANY_REQUESTS);
 
     int code;
     String message;

@@ -51,6 +51,15 @@ public final class RedisKeys {
         return "cache:reset_password_token:" + resetToken;
     }
 
+
+    public static String loginFailCount(UUID userId) {
+        return "cache:login_fail_count:" + userId;
+    }
+
+    public static String loginLockout(UUID userId) {
+        return "cache:login_lockout:" + userId;
+    }
+
     private RedisKeys() {
     }
 }

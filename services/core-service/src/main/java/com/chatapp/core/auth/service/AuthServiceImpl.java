@@ -1,5 +1,6 @@
 package com.chatapp.core.auth.service;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -7,6 +8,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,6 +26,7 @@ import com.chatapp.core.base.UserResponse;
 import com.chatapp.core.base.util.HashUtils;
 import com.chatapp.core.base.constant.LoginAuditEventType;
 import com.chatapp.core.base.constant.OtpPurpose;
+import com.chatapp.core.base.constant.RedisKeys;
 import com.chatapp.core.base.constant.TwoFactorMethod;
 import com.chatapp.core.base.entity.TwoFactorMethodEntity;
 import com.chatapp.core.base.entity.UserEntity;
@@ -57,6 +60,10 @@ public class AuthServiceImpl implements AuthService {
 
     private static final long REFRESH_TOKEN_TTL_SECONDS = 2_592_000;
 
+    private static final int MAX_FAILED_LOGIN_ATTEMPTS = 5;
+
+    private static final long LOGIN_LOCKOUT_SECONDS = 1_800;
+
     private static final String BACKUP_CODE_METHOD = "BACKUP_CODE";
 
     private static final String ROTATED_REVOKE_REASON = "ROTATED";
@@ -75,6 +82,7 @@ public class AuthServiceImpl implements AuthService {
     private final JwtRevocationService jwtRevocationService;
     private final GeoIpService geoIpService;
     private final LoginAuditLogService loginAuditLogService;
+    private final StringRedisTemplate redisTemplate;
 
     @Override
     @Transactional
@@ -118,12 +126,29 @@ public class AuthServiceImpl implements AuthService {
         }
         UserEntity user = foundUser.get();
 
+        if (isLoginLocked(user.getId())) {
+            log.warn("login rejected userId={} reason=TEMP_LOCKED_OUT", user.getId());
+            loginAuditLogService.record(user.getId(), LoginAuditEventType.LOGIN_FAILED, ipAddress, userAgent,
+                    null, null, "TEMP_LOCKED_OUT");
+            throw new AppException(ErrorCode.ACCOUNT_TEMP_LOCKED);
+        }
+
         if (user.getPasswordHash() == null || !passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
-            log.warn("login failed userId={} reason=WRONG_PASSWORD", user.getId());
+            long failCount = recordFailedLoginAttempt(user.getId());
+            if (failCount >= MAX_FAILED_LOGIN_ATTEMPTS) {
+                lockLogin(user.getId());
+                log.warn("login failed userId={} reason=WRONG_PASSWORD — attempts now exhausted, locking out for {}s",
+                        user.getId(), LOGIN_LOCKOUT_SECONDS);
+            } else {
+                log.warn("login failed userId={} reason=WRONG_PASSWORD attempt={}/{}",
+                        user.getId(), failCount, MAX_FAILED_LOGIN_ATTEMPTS);
+            }
             loginAuditLogService.record(user.getId(), LoginAuditEventType.LOGIN_FAILED, ipAddress, userAgent,
                     null, null, "WRONG_PASSWORD");
             throw new InvalidCredentialsException("Invalid username/email/phone or password");
         }
+        resetFailedLoginAttempts(user.getId());
+
         if (user.isBlocked() || !user.isActive()) {
             log.warn("login failed userId={} reason=ACCOUNT_BLOCKED", user.getId());
             loginAuditLogService.record(user.getId(), LoginAuditEventType.LOGIN_FAILED, ipAddress, userAgent,
@@ -510,6 +535,29 @@ public class AuthServiceImpl implements AuthService {
         } catch (IllegalArgumentException e) {
             throw new TwoFactorMethodNotEnabledException("Unknown 2FA method: " + methodName);
         }
+    }
+
+    private boolean isLoginLocked(UUID userId) {
+        return Boolean.TRUE.equals(redisTemplate.hasKey(RedisKeys.loginLockout(userId)));
+    }
+
+    /** Returns the new count. TTL is (re)applied on every increment so the window keeps sliding
+     *  while attempts keep coming, same as the count itself resetting on success below. */
+    private long recordFailedLoginAttempt(UUID userId) {
+        String key = RedisKeys.loginFailCount(userId);
+        Long count = redisTemplate.opsForValue().increment(key);
+        redisTemplate.expire(key, Duration.ofSeconds(LOGIN_LOCKOUT_SECONDS));
+        return count == null ? 1 : count;
+    }
+
+    private void resetFailedLoginAttempts(UUID userId) {
+        redisTemplate.delete(RedisKeys.loginFailCount(userId));
+    }
+
+    private void lockLogin(UUID userId) {
+        redisTemplate.opsForValue().set(
+                RedisKeys.loginLockout(userId), "1", Duration.ofSeconds(LOGIN_LOCKOUT_SECONDS));
+        redisTemplate.delete(RedisKeys.loginFailCount(userId));
     }
 
     /** Looked up in order username -> email -> phone — LoginRequest.identifier can be any of the three. */

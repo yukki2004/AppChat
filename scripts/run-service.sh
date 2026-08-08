@@ -19,6 +19,12 @@ set -a
 source .env.base
 # shellcheck disable=SC1091
 source .env.dev
+# .env.dev.local — secret THẬT của riêng máy bạn (Gmail App Password...), KHÔNG track trong
+# git (xem .gitignore). Optional: chỉ source nếu tồn tại, override lên trên .env.dev.
+if [[ -f .env.dev.local ]]; then
+  # shellcheck disable=SC1091
+  source .env.dev.local
+fi
 set +a
 
 # File .mmdb tải riêng từng máy (xem docs/.../system/05-cookie-auth-flow.md mục E.10), không

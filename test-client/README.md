@@ -2,7 +2,8 @@
 
 Not a real frontend — just a single static page to manually exercise the auth/2FA flow built
 so far (register, login, TOTP/EMAIL setup, login-2FA challenge/submit, logout/logout-session/
-logout-all, change password, forgot password, session listing) through API Gateway.
+logout-all, change password, forgot password, session listing, QR login) through API Gateway
+(and, for QR login only, a direct WebSocket to Realtime Gateway).
 Delete/replace once a real frontend project exists.
 
 Each step is a collapsible `<details>` block — click the title bar to expand/collapse. The
@@ -34,6 +35,16 @@ English like the rest of the repo's dev docs.
    cd services/api-gateway
    APP_REDIS_PORT=6380 go run ./cmd
    ```
+
+3b. Realtime Gateway — only needed for section 11 (QR login); skip it if you're not testing that.
+   Easiest via `./scripts/run-service.sh realtime-gateway` (sources `.env.dev`, which already has
+   `APP_REDIS_ADDR`/`APP_RABBITMQ_URL` set) — or manually:
+   ```
+   cd services/realtime-gateway
+   APP_REDIS_ADDR=localhost:6380 APP_RABBITMQ_URL=amqp://chatapp_dev:rabbitmq_dev_pw@localhost:5673/ go run ./cmd
+   ```
+   Listens on `:8081` (`config/base.yaml`) — the test page's WS connects straight to it, not
+   through API Gateway (API Gateway doesn't handle WS).
 
 4. This page, served on the **fixed port 5500** (Gateway's CORS only allows this origin —
    see `services/api-gateway/cmd/main.go`):
@@ -102,6 +113,67 @@ stored and sent back by the browser, exactly like a real client would.
 - Phone/SMS OTP delivery (register, 2FA later) goes through `OtpSmsSender` — no real provider
   chosen yet, it just logs the code to core-service's own console/log output instead of sending a
   real SMS. Copy the code from there when testing a phone-based flow.
+
+## Testing from a phone on the same LAN (for QR login's 2-device flow)
+
+Section 11 as described below simulates both devices in 1 browser tab — good enough to verify
+the flow works, but not a real "quét QR bằng máy khác" test. To use an actual phone as the
+"thiết bị cũ" (already logged-in device confirming), instead of a 2nd tab on the same PC:
+
+1. Find your PC's LAN IP (Windows: `ipconfig`, look for the Wi-Fi/Ethernet adapter's IPv4 —
+   e.g. `192.168.1.20`). Phone and PC must be on the same Wi-Fi/network.
+2. Start API Gateway with that IP allowed for CORS:
+   ```
+   APP_CORS_EXTRA_ORIGINS=http://192.168.1.20:5500 ./scripts/run-service.sh api-gateway
+   ```
+   (`run-service.sh` doesn't source this one from `.env.dev` — it's per-machine/per-network, set
+   it inline each time instead of committing your LAN IP into a tracked file.)
+3. Serve this page as usual (`python -m http.server 5500`) — `http.server` already binds all
+   interfaces, no change needed there.
+4. On the PC, open `http://192.168.1.20:5500` (**not** `localhost` — must match the origin you
+   allowed in step 2, since the page's JS derives the API/WS URLs from whatever host loaded it).
+5. On the phone's browser, open the exact same `http://192.168.1.20:5500`.
+6. Log in on the PHONE (section 2) — the phone is now "thiết bị cũ".
+7. On the PC: section 11 part A, "Tạo QR + mở WS chờ".
+8. On the phone: section 11 part B. The page's own camera scanner ("Quét QR bằng camera",
+   `BarcodeDetector` API) **will NOT work over plain `http://<lan-ip>:5500`** — browsers only
+   allow camera access on a secure context (`https://` or `localhost`), and a LAN IP over HTTP
+   is neither. Paste the `qr_token` shown under the QR on the PC into the phone's
+   `qrlogin-token` field by hand instead, then device-info + confirm.
+
+   Want the camera scan to actually work from the phone? Put an HTTPS tunnel in front of port
+   5500 (e.g. `ngrok http 5500`) and open the `https://...ngrok...` URL on the phone instead of
+   the LAN IP — that's a secure context, so the camera prompt will appear. (You'd also need
+   `GATEWAY`/`REALTIME_GATEWAY_WS` in `index.html` to resolve to a reachable API/WS host in that
+   case too, not just the page itself — out of scope for a quick local test.)
+9. Watch the PC's WS status line flip to approved and auto-claim.
+
+## Testing QR login (section 11)
+
+Simulates both devices on this one page/1 cookie jar — realistic enough since the "new device"
+init/claim calls don't need a cookie at all, and the "old device" confirm call just needs
+whatever session is currently logged in via section 2:
+
+1. Log in normally first (section 2) — this page is now "the old, already-logged-in device".
+2. Section 11, part A: "Tạo QR + mở WS chờ" — calls `POST /auth/qr-login/init` (public), shows
+   the QR code + raw `qr_token`, opens a WebSocket straight to `realtime-gateway` at
+   `ws://localhost:8081/ws/qr-login?token=...` and waits.
+3. Section 11, part B: "Xem thông tin thiết bị đang xin login" (`GET .../device-info`, uses the
+   session from step 1) — shows the IP/User-Agent the QR session was created with (this page's
+   own IP/UA, since steps A and B run in the same browser) — this is the security-gate step a
+   real device would show the user before confirming. Then "Xác nhận đăng nhập (approve)"
+   (`POST .../confirm`).
+4. Watch part A's status line — once core-service's outbox publishes `user.qr_login_approved`
+   and realtime-gateway pushes it down the WS, the page auto-calls `POST .../claim`. **This
+   overwrites the page's current `access_token`/`refresh_token` cookies** with the newly-claimed
+   session — expected behavior (the "new device" really did just log in), not a bug. Re-run
+   section 10 ("Kiểm tra trạng thái") afterward if you want to confirm the session is now the
+   claimed one.
+5. To see the 90s expiry path instead: do step 2 only, then wait without doing step 3 — the
+   status line switches to "QR đã hết hạn" once realtime-gateway's TTL timer fires.
+
+If part A's status stays stuck on "Đang mở WS..." or shows a WS error, `realtime-gateway` isn't
+running — see "Run" step 3b above.
 
 ## Testing Google OAuth login (section 2b)
 

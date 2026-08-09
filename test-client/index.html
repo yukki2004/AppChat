@@ -225,6 +225,42 @@
 </details>
 
 <details open class="step">
+  <summary>11. Đăng nhập bằng QR (mô phỏng 2 thiết bị trên cùng 1 trang)</summary>
+  <p>Test trên đúng 1 trang/1 cookie jar: bước A đóng vai "thiết bị mới" (chưa đăng nhập, gọi
+  <code>/auth/qr-login/init</code> — public, không cần cookie), bước B đóng vai "thiết bị cũ" —
+  dùng phiên ĐANG đăng nhập (đăng nhập trước ở bước 2) để xác nhận. Khi WS báo
+  <code>approved</code>, trang tự gọi <code>claim</code> luôn — lúc đó cookie
+  <code>access_token</code>/<code>refresh_token</code> của trang bị GHI ĐÈ bằng phiên mới (thiết
+  bị "mới" vừa login) — đúng hành vi thật, không phải bug. Cần <code>realtime-gateway</code>
+  đang chạy (xem README) thì bước A mới nhận được thông báo approve qua WS.</p>
+
+  <p><b>A. Thiết bị mới</b></p>
+  <button onclick="qrLoginInit()">Tạo QR + mở WS chờ</button>
+  <div id="qr-login-qr"></div>
+  <p id="qr-login-ws-status"><em>(chưa tạo QR)</em></p>
+
+  <hr />
+  <p><b>⬇ Ô token dùng CHUNG cho cả A và B ⬇</b></p>
+  <p>Test 1 tab: ô này tự điền sau khi bấm "Tạo QR" ở bước A, dùng luôn cho bước B bên dưới.
+  Test 2 tab (khuyến khích hơn — xem README): bên tab "thiết bị mới" bấm Tạo QR xong, copy giá
+  trị ô này, sang tab "thiết bị cũ" (đã đăng nhập) PASTE vào đúng ô này trước rồi mới bấm 2 nút
+  ở phần B — thiếu bước dán này là nguyên nhân phổ biến nhất gây lỗi 404 <code>//confirm</code>
+  (token rỗng).</p>
+  <input id="qrlogin-token" placeholder="qr_token — dán vào đây trước khi bấm nút ở phần B" />
+
+  <p><b>B. Thiết bị cũ (dùng phiên đang đăng nhập ở TAB NÀY để xác nhận)</b></p>
+  <p>Camera chỉ mở được ở "secure context" (<code>https://</code> hoặc đúng <code>localhost</code>)
+  — mở trang bằng IP LAN thường (<code>http://192.168.x.x</code>) thì trình duyệt CHẶN camera,
+  dùng ô dán token thủ công ở trên thay thế (xem README mục "Testing from a phone on the same LAN").</p>
+  <button onclick="qrLoginStartScan()">Quét QR bằng camera</button>
+  <button onclick="qrLoginStopScan()">Tắt camera</button>
+  <video id="qr-scan-video" style="max-width:280px;display:none;" playsinline muted></video>
+  <p id="qr-scan-status"></p>
+  <button onclick="qrLoginDeviceInfo()">Xem thông tin thiết bị đang xin login</button>
+  <button onclick="qrLoginConfirm()">Xác nhận đăng nhập (approve)</button>
+</details>
+
+<details open class="step">
   <summary>10. Kiểm tra trạng thái đăng nhập</summary>
   <p>Chưa có endpoint "whoami" riêng — nút này gọi tạm <code>POST /2fa/totp/setup</code> làm phép
   thử vì nó cần access_token hợp lệ (tác dụng phụ vô hại: chỉ ghi 1 secret tạm vào Redis, không đụng
@@ -249,7 +285,10 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
 //# sourceMappingURL=/sm/26b4b0d0b1e283d6b3ec9857ac597d7a60c76ac17be1ef4c965f03086de426bb.map
 </script>
 <script>
-const GATEWAY = 'http://localhost:8080';
+// Derived from location.hostname, not hardcoded 'localhost' — so opening this same page from a
+// phone via the PC's LAN IP (http://<pc-lan-ip>:5500) still calls the right host instead of the
+// phone's own localhost. See test-client/README.md "Testing from a phone on the same LAN".
+const GATEWAY = `http://${location.hostname}:8080`;
 
 async function call(method, path, body) {
   const headers = body ? { 'Content-Type': 'application/json' } : {};
@@ -445,6 +484,131 @@ function logoutAll() {
 
 function checkAuth() {
   return call('POST', '/2fa/totp/setup', null);
+}
+
+// realtime-gateway is a separate process/port from API Gateway — WS connects straight to it,
+// never through API Gateway (it doesn't handle WS, see services/api-gateway/CLAUDE.md).
+// Derived from location.hostname for the same LAN-testing reason as GATEWAY above.
+const REALTIME_GATEWAY_WS = `ws://${location.hostname}:8081`;
+
+let qrLoginSocket = null;
+
+async function qrLoginInit() {
+  const data = await call('POST', '/auth/qr-login/init', null);
+  const token = data && data.data && data.data.qr_token;
+  if (!token) return;
+
+  document.getElementById('qrlogin-token').value = token;
+
+  const qr = qrcode(0, 'M');
+  qr.addData(token);
+  qr.make();
+  document.getElementById('qr-login-qr').innerHTML = qr.createSvgTag(6);
+
+  connectQrLoginSocket(token);
+}
+
+function connectQrLoginSocket(token) {
+  if (qrLoginSocket) qrLoginSocket.close();
+  const statusEl = document.getElementById('qr-login-ws-status');
+  statusEl.textContent = 'Đang mở WS...';
+
+  const ws = new WebSocket(`${REALTIME_GATEWAY_WS}/ws/qr-login?token=${encodeURIComponent(token)}`);
+  qrLoginSocket = ws;
+
+  ws.onopen = () => { statusEl.textContent = 'WS đã kết nối — đang chờ thiết bị cũ xác nhận...'; };
+  ws.onerror = () => { statusEl.textContent = 'WS lỗi — realtime-gateway có đang chạy ở :8081 không? (xem README)'; };
+  ws.onclose = () => { statusEl.textContent += ' [WS đã đóng]'; };
+  ws.onmessage = async (ev) => {
+    let msg;
+    try { msg = JSON.parse(ev.data); } catch { return; }
+    if (msg.type === 'qr_login.approved') {
+      statusEl.textContent = 'Đã được xác nhận — đang gọi claim...';
+      await qrLoginClaim(token);
+    } else if (msg.type === 'qr_login.expired') {
+      statusEl.textContent = 'QR đã hết hạn (90s) — bấm "Tạo QR" lại.';
+    }
+  };
+}
+
+function qrLoginClaim(token) {
+  // Public endpoint — no cookie required to call it, but the response Set-Cookie overwrites
+  // whatever session this page currently holds with the newly-approved one (see step 11's note).
+  return call('POST', `/auth/qr-login/${encodeURIComponent(token)}/claim`, null);
+}
+
+let qrScanStream = null;
+
+/** Uses the browser's native BarcodeDetector (Chrome/Android, Edge) — no external library
+ *  needed. Safari/iOS doesn't implement it as of writing; falls back to telling the user to
+ *  paste the token by hand instead (already supported, see the input field above). Requires a
+ *  secure context (https:// or localhost) — a plain http://<lan-ip> origin gets getUserMedia
+ *  blocked by the browser regardless of BarcodeDetector support. */
+async function qrLoginStartScan() {
+  const statusEl = document.getElementById('qr-scan-status');
+
+  if (!('BarcodeDetector' in window)) {
+    statusEl.textContent = 'Trình duyệt này không hỗ trợ BarcodeDetector (VD Safari/iOS) — dán token tay vào ô bên trên.';
+    return;
+  }
+  if (!window.isSecureContext) {
+    statusEl.textContent = 'Trang này không phải secure context (cần https:// hoặc localhost) — camera bị trình duyệt chặn. Dán token tay thay thế.';
+    return;
+  }
+
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+  } catch (err) {
+    statusEl.textContent = 'Không mở được camera: ' + err.message;
+    return;
+  }
+  qrScanStream = stream;
+
+  const video = document.getElementById('qr-scan-video');
+  video.srcObject = stream;
+  video.style.display = 'block';
+  await video.play();
+
+  statusEl.textContent = 'Đang quét...';
+  const detector = new BarcodeDetector({ formats: ['qr_code'] });
+
+  const tick = async () => {
+    if (!qrScanStream) return; // stopped by qrLoginStopScan or a successful scan below
+    try {
+      const codes = await detector.detect(video);
+      if (codes.length > 0) {
+        document.getElementById('qrlogin-token').value = codes[0].rawValue;
+        statusEl.textContent = 'Đã quét được token — camera tự tắt.';
+        qrLoginStopScan();
+        return;
+      }
+    } catch {
+      // transient decode error on this frame — just keep trying on the next one
+    }
+    requestAnimationFrame(tick);
+  };
+  tick();
+}
+
+function qrLoginStopScan() {
+  if (qrScanStream) {
+    qrScanStream.getTracks().forEach((t) => t.stop());
+    qrScanStream = null;
+  }
+  document.getElementById('qr-scan-video').style.display = 'none';
+}
+
+function qrLoginDeviceInfo() {
+  const token = val('qrlogin-token');
+  if (!token) { log('Ô token đang trống — dán qr_token vào ô ở giữa bước A và B trước.', false); return; }
+  return call('GET', `/auth/qr-login/${encodeURIComponent(token)}/device-info`, null);
+}
+
+function qrLoginConfirm() {
+  const token = val('qrlogin-token');
+  if (!token) { log('Ô token đang trống — dán qr_token vào ô ở giữa bước A và B trước.', false); return; }
+  return call('POST', `/auth/qr-login/${encodeURIComponent(token)}/confirm`, null);
 }
 
 function val(id) {

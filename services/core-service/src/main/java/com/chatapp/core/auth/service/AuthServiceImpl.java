@@ -281,6 +281,13 @@ public class AuthServiceImpl implements AuthService {
             throw new AppException(ErrorCode.ACCOUNT_BLOCKED);
         }
 
+        if (!isIdentifierVerified(user)) {
+            log.warn("login failed userId={} reason=NOT_VERIFIED", user.getId());
+            loginAuditLogService.record(user.getId(), LoginAuditEventType.LOGIN_FAILED, ipAddress, userAgent,
+                    null, null, "NOT_VERIFIED");
+            throw new AppException(ErrorCode.ACCOUNT_NOT_VERIFIED);
+        }
+
         return completeLogin(user, ipAddress, userAgent);
     }
 
@@ -716,6 +723,17 @@ public class AuthServiceImpl implements AuthService {
         return userRepository.findByUsernameAndDeletedAtIsNull(identifier)
                 .or(() -> userRepository.findByEmailAndDeletedAtIsNull(identifier))
                 .or(() -> userRepository.findByPhoneAndDeletedAtIsNull(identifier));
+    }
+
+    /** Defense-in-depth, not the primary guarantee — password/OAuth register now always verify
+     *  the one identifier (email XOR phone) before the user row is created (AuthService#registerVerify,
+     *  OAuthServiceImpl#registerNewUser), so this should always pass for accounts created going
+     *  forward. Kept as a gate in case a future code path ever creates/links a row out of order. */
+    private boolean isIdentifierVerified(UserEntity user) {
+        if (user.getEmail() != null && user.getEmailVerifiedAt() == null) {
+            return false;
+        }
+        return user.getPhone() == null || user.getPhoneVerifiedAt() != null;
     }
 
 }

@@ -63,6 +63,10 @@ public class OAuthServiceImpl implements OAuthService {
         String displayName = userInfo.displayName() != null ? userInfo.displayName() : userInfo.email();
         UserEntity user = new UserEntity(
                 generateUniqueUsername(userInfo.email()), userInfo.email(), null, null, displayName);
+        // OAuthUserInfo.emailVerified() isn't checked here yet (separate gap from core-service
+        // CLAUDE.md note #8) — marking verified regardless so the new login verified-status gate
+        // (AuthServiceImpl#isIdentifierVerified) doesn't lock out existing OAuth users.
+        user.markEmailVerified();
         UserEntity saved = userRepository.save(user);
 
         UserOAuthProviderEntity link = new UserOAuthProviderEntity(

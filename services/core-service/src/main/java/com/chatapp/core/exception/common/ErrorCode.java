@@ -56,6 +56,7 @@ public enum ErrorCode {
     INVALID_BACKUP_CODE(4015, "Invalid backup code", HttpStatus.UNAUTHORIZED),
     INVALID_TWO_FACTOR_CODE(4016, "Invalid verification code", HttpStatus.UNAUTHORIZED),
     BACKUP_CODE_NOT_AVAILABLE(4017, "Backup codes are not available for this account", HttpStatus.BAD_REQUEST),
+    ACCOUNT_NOT_VERIFIED(4018, "This account's email/phone has not been verified yet", HttpStatus.UNAUTHORIZED),
 
     // auth/refresh + auth/sessions (POST /auth/refresh, DELETE /auth/sessions/{id})
     MISSING_REFRESH_TOKEN(4021, "Missing refresh_token", HttpStatus.UNAUTHORIZED),

@@ -71,7 +71,7 @@ public class FriendServiceImpl implements FriendService {
             throw new AppException(ErrorCode.FRIEND_REQUEST_NOT_ALLOWED);
         }
 
-        // TODO: publish friend.request_sent (RoutingKeys.UserExchange, user.exchange) once the
+        // TODO: publish friend.request_sent (RabbitConstant.UserExchange, user.exchange) once the
         // outbox pattern is wired up for this service — see skills/outbox-pattern.md. Per
         // docs/.../02-rabbitmq-exchange-map.md the documented consumer is Notification Service
         // (push FCM/APNs/in-app to the addressee). Separately — NOT in the current spec, a
@@ -120,7 +120,7 @@ public class FriendServiceImpl implements FriendService {
 
         friendship.accept();
         friendshipRepository.save(friendship);
-        // TODO: publish friend.accepted (RoutingKeys.UserExchange) once the outbox pattern is
+        // TODO: publish friend.accepted (RabbitConstant.UserExchange) once the outbox pattern is
         // wired up for this service — see skills/outbox-pattern.md.
     }
 
@@ -154,7 +154,7 @@ public class FriendServiceImpl implements FriendService {
         friendshipRepository.delete(friendship);
         closeFriendRepository.deleteById_UserIdAndId_FriendId(currentUserId, otherUserId);
         closeFriendRepository.deleteById_UserIdAndId_FriendId(otherUserId, currentUserId);
-        // TODO: publish friend.removed (RoutingKeys.UserExchange) once the outbox pattern is
+        // TODO: publish friend.removed (RabbitConstant.UserExchange) once the outbox pattern is
         // wired up for this service — see skills/outbox-pattern.md.
     }
 

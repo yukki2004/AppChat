@@ -30,6 +30,11 @@ spring:
     properties:
       mail.smtp.auth: true
       mail.smtp.starttls.enable: true
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_DEFAULT_USER:}
+    password: ${RABBITMQ_DEFAULT_PASS:}
 
 app:
   cookie-domain: ${COOKIE_DOMAIN:}
@@ -50,6 +55,10 @@ app:
         client-id: ${GOOGLE_OAUTH_CLIENT_ID:}
         client-secret: ${GOOGLE_OAUTH_CLIENT_SECRET:}
         redirect-uri: ${GOOGLE_OAUTH_REDIRECT_URI:}
+  outbox:
+    # OutboxRetryJob sweep interval — only picks up rows a synchronous publish already failed
+    # on (see OutboxEventPublisher), so this can be relatively relaxed.
+    retry-interval-ms: ${OUTBOX_RETRY_INTERVAL_MS:30000}
 
 jwt:
   private-key-path: ${JWT_PRIVATE_KEY_PATH:./keys/private_key.pem}

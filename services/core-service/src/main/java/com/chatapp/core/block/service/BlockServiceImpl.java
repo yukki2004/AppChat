@@ -69,7 +69,7 @@ public class BlockServiceImpl implements BlockService {
         closeFriendRepository.deleteById_UserIdAndId_FriendId(blockerId, blockedId);
         closeFriendRepository.deleteById_UserIdAndId_FriendId(blockedId, blockerId);
 
-        // TODO: publish user.blocked (RoutingKeys.UserExchange) once the outbox pattern is wired
+        // TODO: publish user.blocked (RabbitConstant.UserExchange) once the outbox pattern is wired
         // up for this service — see skills/outbox-pattern.md.
     }
 
@@ -77,7 +77,7 @@ public class BlockServiceImpl implements BlockService {
     @Transactional
     public void unblock(UUID blockerId, UUID blockedId) {
         userBlockRepository.deleteByBlockerIdAndBlockedId(blockerId, blockedId);
-        // TODO: publish user.unblocked (RoutingKeys.UserExchange) once the outbox pattern is
+        // TODO: publish user.unblocked (RabbitConstant.UserExchange) once the outbox pattern is
         // wired up for this service — see skills/outbox-pattern.md.
     }
 

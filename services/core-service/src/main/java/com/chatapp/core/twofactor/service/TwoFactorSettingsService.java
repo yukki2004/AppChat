@@ -152,7 +152,7 @@ public class TwoFactorSettingsService {
                 .orElseThrow(() -> new AppException(ErrorCode.TWO_FACTOR_METHOD_NOT_ENABLED));
 
         twoFactorMethodRepository.delete(entity);
-        // TODO: publish a user.two_factor_disabled security alert (RoutingKeys.UserExchange)
+        // TODO: publish a user.two_factor_disabled security alert (RabbitConstant.UserExchange)
         // once the outbox pattern is wired up for this service — see skills/outbox-pattern.md.
         // Disabling 2FA is a high-value target for account takeover, the account owner should
         // always be notified even if they didn't do it themselves.

@@ -71,6 +71,7 @@ public enum ErrorCode {
 
     // twofactor/otp (shared OTP attempt lockout, e.g. email 2FA / password reset code)
     OTP_LOCKED(6001, "Too many failed attempts — try again in a few minutes", HttpStatus.TOO_MANY_REQUESTS),
+    OTP_RESEND_TOO_SOON(6002, "A code was already sent — wait before requesting another", HttpStatus.TOO_MANY_REQUESTS),
 
     // auth/oauth (POST /auth/oauth/{provider}/callback)
     OAUTH_PROVIDER_UNSUPPORTED(7001, "Unsupported OAuth provider", HttpStatus.BAD_REQUEST),

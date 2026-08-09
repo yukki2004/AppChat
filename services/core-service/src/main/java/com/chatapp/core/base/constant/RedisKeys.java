@@ -29,6 +29,14 @@ public final class RedisKeys {
         return "cache:otp_lockout:" + purpose.name() + ":" + target;
     }
 
+    /** Blocks OtpCodeService.generate() from firing a 2nd code at the same (target, purpose)
+     *  before OtpProperties.resendCooldownSeconds has passed — separate from otpLockout above
+     *  (that one only kicks in after wrong verify attempts, this one caps resend spam outright).
+     *  TTL = resendCooldownSeconds, set at the call site. */
+    public static String otpResendCooldown(String target, OtpPurpose purpose) {
+        return "cache:otp_resend_cooldown:" + purpose.name() + ":" + target;
+    }
+
     /** Set by single-device logout to blacklist exactly the access_token in use for that
      *  request — Gateway checks this per request (05-cookie-auth-flow.md E.4/E.6). TTL = time
      *  remaining until that token's own `exp`, set at the call site (JwtRevocationService),

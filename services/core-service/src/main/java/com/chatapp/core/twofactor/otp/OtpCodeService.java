@@ -38,13 +38,28 @@ public class OtpCodeService {
 
 
 
+    /** Cheap pre-check for callers about to do expensive work (BCrypt hashing, DB uniqueness
+     *  checks, Redis writes) before actually generating a code — see
+     *  AuthServiceImpl#registerStart/linkIdentifierStart, which call this FIRST, before any of
+     *  that work, so a spam request gets rejected practically for free instead of paying the
+     *  full cost of a real attempt just to be rejected at the last step. generate() below still
+     *  re-checks both conditions itself (defense-in-depth against races and other callers that
+     *  don't pre-check). */
+    public void requireNotOnCooldown(String target, OtpPurpose purpose) {
+        if (isLocked(target, purpose)) {
+            log.warn("otp pre-check rejected target={} purpose={} reason=LOCKED_OUT", target, purpose);
+            throw new AppException(ErrorCode.OTP_LOCKED);
+        }
+        if (isResendTooSoon(target, purpose)) {
+            log.warn("otp pre-check rejected target={} purpose={} reason=RESEND_TOO_SOON", target, purpose);
+            throw new AppException(ErrorCode.OTP_RESEND_TOO_SOON);
+        }
+    }
+
     @Transactional
     public String generate(String target, OtpPurpose purpose, UUID userId) {
         log.debug("otp generate start target={} purpose={} userId={}", target, purpose, userId);
-        if (isLocked(target, purpose)) {
-            log.warn("otp generate rejected target={} purpose={} reason=LOCKED_OUT", target, purpose);
-            throw new AppException(ErrorCode.OTP_LOCKED);
-        }
+        requireNotOnCooldown(target, purpose);
 
         List<OtpCodeEntity> stale = otpCodeRepository.findByTargetAndPurposeAndUserIdAndUsedAtIsNull(target, purpose, userId);
         if (!stale.isEmpty()) {
@@ -58,6 +73,7 @@ public class OtpCodeService {
         OtpCodeEntity entity = new OtpCodeEntity(
                 target, HashUtils.sha256Hex(code), purpose, userId, expiresAt, otpProperties.getMaxAttempts());
         otpCodeRepository.save(entity);
+        markResendCooldown(target, purpose);
         log.info("otp generate success target={} purpose={} userId={} expiresAt={}", target, purpose, userId, expiresAt);
         return code;
     }
@@ -104,6 +120,16 @@ public class OtpCodeService {
 
     private boolean isLocked(String target, OtpPurpose purpose) {
         return Boolean.TRUE.equals(redisTemplate.hasKey(RedisKeys.otpLockout(target, purpose)));
+    }
+
+    private boolean isResendTooSoon(String target, OtpPurpose purpose) {
+        return Boolean.TRUE.equals(redisTemplate.hasKey(RedisKeys.otpResendCooldown(target, purpose)));
+    }
+
+    private void markResendCooldown(String target, OtpPurpose purpose) {
+        redisTemplate.opsForValue().set(
+                RedisKeys.otpResendCooldown(target, purpose), "1",
+                Duration.ofSeconds(otpProperties.getResendCooldownSeconds()));
     }
 
     private void lock(String target, OtpPurpose purpose) {

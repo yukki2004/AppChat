@@ -82,6 +82,11 @@ stored and sent back by the browser, exactly like a real client would.
 - Section 2c adds the identifier you *didn't* register with (re-auths via password, target column
   must currently be NULL) — after it succeeds, log in again in section 2 using the newly-linked
   identifier; no extra wiring needed since login already looks up by username/email/phone.
+- Every OTP send (register, link, 2FA, forgot-password — all go through the same
+  `OtpCodeService.generate()`) is rate-limited to 1 per 60s per (target, purpose)
+  (`OTP_RESEND_TOO_SOON`, `OTP_RESEND_COOLDOWN_SECONDS` env var) — stops the endpoint being used
+  to spam someone else's real inbox/phone. If you click "gửi OTP" twice quickly while testing,
+  the 2nd click is expected to 429, not a bug.
 
 ## Testing forgot password (section 8)
 

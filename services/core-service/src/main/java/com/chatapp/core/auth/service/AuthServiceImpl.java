@@ -95,6 +95,7 @@ public class AuthServiceImpl implements AuthService {
                 request.getUsername(), request.getEmail() != null, request.getPhone() != null);
 
         String target = request.getEmail() != null ? request.getEmail() : request.getPhone();
+        otpCodeService.requireNotOnCooldown(target, OtpPurpose.REGISTER);
 
         if (userRepository.existsByUsername(request.getUsername())) {
             log.warn("registerStart rejected username={} reason=USERNAME_TAKEN", request.getUsername());
@@ -178,6 +179,7 @@ public class AuthServiceImpl implements AuthService {
                 userId, request.getEmail() != null, request.getPhone() != null);
 
         String target = request.getEmail() != null ? request.getEmail() : request.getPhone();
+        otpCodeService.requireNotOnCooldown(target, OtpPurpose.LINK_IDENTIFIER);
 
         UserEntity user = userRepository.findByIdAndDeletedAtIsNull(userId)
                 .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_FOUND));

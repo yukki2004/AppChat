@@ -38,6 +38,7 @@ app:
     code-ttl-seconds: ${OTP_CODE_TTL_SECONDS:300}
     max-attempts: ${OTP_MAX_ATTEMPTS:5}
     lockout-seconds: ${OTP_LOCKOUT_SECONDS:1800}
+    resend-cooldown-seconds: ${OTP_RESEND_COOLDOWN_SECONDS:60}
   totp:
     secret-encryption-key: ${TOTP_SECRET_ENCRYPTION_KEY:}
     issuer: ${TOTP_ISSUER:ChatApp}

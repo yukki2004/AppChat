@@ -353,4 +353,70 @@ cách server tự lấy chung cho cả web và mobile:**
   báo sau khi đã tạo session, để user tự bấm "không phải tôi" → trigger `/auth/logout-all` nếu
   cần.
 
+## **E.11 Đăng nhập bằng QR (thiết bị mới, không cần nhập lại 2FA)**
+
+Kiểu WhatsApp Web: thiết bị MỚI (chưa có session) hiện QR, thiết bị CŨ (đã đăng nhập, đã qua
+2FA nếu có) quét và xác nhận — chính hành động xác nhận đó thay thế vai trò 2FA cho thiết bị
+mới, không phải bỏ qua bảo mật mà là chuyển trust sang kênh khác (thiết bị cũ đã chứng minh
+danh tính rồi).
+
+**Trạng thái `qr_token` — Redis only, không lưu DB, TTL 90s:**
+
+```
+POST /auth/qr-login/init  (public)          -> tạo cache:qr_login:{qr_token},
+                                                 status=PENDING, TTL 90s
+GET  /auth/qr-login/{qr_token}/status (public) -> REST fallback/bootstrap sau khi WS reconnect,
+                                                 KHÔNG phải cơ chế chính
+GET  /auth/qr-login/{qr_token}/device-info (protected, X-User-Id) -> thiết bị cũ xem thông tin
+                                                 thiết bị đang xin login trước khi xác nhận
+POST /auth/qr-login/{qr_token}/confirm (protected, X-User-Id) -> status=APPROVED, publish
+                                                 outbox event user.qr_login_approved
+POST /auth/qr-login/{qr_token}/claim (public, gọi đúng 1 lần) -> issueTokensForDevice(), set
+                                                 cookie access_token/refresh_token, xoá Redis key
+```
+
+**Thông báo realtime cho thiết bị mới — WebSocket qua Realtime Gateway, không polling:**
+- Thiết bị mới mở `GET /ws/qr-login?token={qr_token}` thẳng tới Realtime Gateway (KHÔNG qua API
+  Gateway — xem E.8, API Gateway không xử lý WS). Realtime Gateway **không verify `qr_token`**
+  trước khi upgrade (không gRPC, không đọc chéo Redis của Core Service) — chấp nhận connect, tự
+  đăng ký `cache:ws:qr_login:{qr_token}` (registry riêng của Realtime Gateway, khác hẳn
+  `cache:qr_login:{qr_token}` của Core Service), rồi chờ. Token giả/không tồn tại thì không bao
+  giờ có event khớp tới, connection tự đóng sau đúng 90s (timer cố định, khớp
+  `RedisKeys.QR_LOGIN_TTL_SECONDS` bên Core Service) — kết quả giống hệt verify trước mà không
+  cần 2 service này biết gì về nhau ngoài qua đúng 1 RabbitMQ event.
+- Core Service publish `user.qr_login_approved` (`user.exchange`) qua outbox pattern (bảng
+  `outbox_events`, insert ngay trong transaction của `/confirm`, publish thật ngay sau khi
+  transaction đó commit — tự làm trong chính core-service qua `RabbitTemplate`, không có process
+  riêng nào khác — xem `skills/outbox-pattern.md`). Payload chỉ có `qr_token` (JSON key —
+  `spring.jackson.property-naming-strategy=SNAKE_CASE` áp dụng toàn cục, kể cả payload này; Go
+  struct phía Realtime Gateway phải tag đúng `json:"qr_token"`, không phải `qrToken`) — không có
+  `user_id`, vì registry của Realtime Gateway tra theo `qr_token`, không theo `user_id` (thiết bị
+  mới chưa có user_id nào để tra).
+- Realtime Gateway consume event, tra registry lấy đúng connection đang mở, push
+  `{"type": "qr_login.approved"}`, đóng connection (single-use). Hết TTL mà chưa approve thì
+  push `{"type": "qr_login.expired"}` rồi tự đóng. Dedup theo `event_id` qua Redis SETNX
+  `cache:received_event_dedup:{event_id}` (Realtime Gateway không có DB SQL nên không có bảng
+  `received_event_dedup` như quy ước chung, thay bằng key Redis TTL vài giờ).
+- **Struct `*Publish`** (`internal/base/message/qrlogin/` bên Realtime Gateway —
+  `ApprovedPublish`/`ExpiredPublish`, mỗi struct tự có field `Type` riêng) — quy ước đặt tên DÙNG
+  CHUNG cho MỌI thứ Realtime Gateway push qua WS (mirror suffix DTO của Java: Response/Public/
+  Cache bên Java, `Publish` cho "struct bắn ra qua WS" bên Go), không phải riêng QR login. Mỗi
+  feature có 1 subpackage riêng dưới `base/message/` (VD `message/qrlogin/`) tự định nghĩa struct
+  `*Publish` + Redis key builder của mình — `internal/base/socket/` (`Registry.Register`/
+  `Unregister`/`Resolve` + `WriteJSON`) và `internal/base/rabbit/` (`DeclareAndConsume`) hoàn
+  toàn generic, không có gì đặt tên theo feature cụ thể, để 2 package đó không phải sửa mỗi khi
+  có feature mới — logic riêng từng feature nằm ở `internal/consumer/{feature}_consumer.go` +
+  `internal/ws/{feature}_handler.go`.
+- Heartbeat: WS Ping/Pong chuẩn (20s/lần, khớp CLAUDE.md của Realtime Gateway). Reconnect do
+  client tự lo (backoff) — mỗi lần reconnect là 1 connection/connID mới, ghi đè registry
+  (`Register` dùng Redis `SET`, không `SADD`, vì tại 1 thời điểm chỉ có đúng 1 connection hợp lệ
+  cho 1 `qr_token` — 1 feature khác cần nhiều connection/key thì tự chọn cấu trúc Redis khác,
+  không dùng chung `Register` này).
+
+**`issueTokensForDevice` — cố ý bỏ qua `completeLogin()`/2FA:**
+`AuthService.issueTokensForDevice(userId, ip, userAgent)` (`AuthServiceImpl`) gọi thẳng
+`issueTokens()` nội bộ, không qua `completeLogin()` — vì bước xác nhận của thiết bị cũ ở
+`/confirm` đã đóng đúng vai trò 2FA rồi, bắt thiết bị mới nhập lại 2FA lần nữa là dư thừa và
+phá vỡ mục đích của tính năng.
+
 *─── Hết tài liệu ───*

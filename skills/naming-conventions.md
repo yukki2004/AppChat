@@ -17,6 +17,12 @@
   `social.exchange`, `media.exchange`.
 - Event publish bởi service nào thì domain đó do service đó sở hữu — không service khác được
   publish vào exchange không phải của mình (VD: chỉ Messaging Service publish vào `chat.exchange`).
+- **Java**: mỗi event có 2 hằng số String phẳng trong `RabbitConstant`, hậu tố
+  `_EXCHANGE`/`_ROUTING_KEY` (VD `USER_QR_LOGIN_APPROVED_EXCHANGE`,
+  `USER_QR_LOGIN_APPROVED_ROUTING_KEY`) — không gói vào 1 record/object trung gian. KHÔNG có
+  hằng số `_QUEUE` ở phía publisher — khai báo/bind queue là việc của CONSUMER (service nào tự
+  consume thì tự đặt tên + khai báo queue bên phía nó, publisher không biết và không khai báo hộ).
+  Xem `base/constant/RabbitConstant.java` (Core Service).
 
 ## 2. Event ID / idempotency key
 
@@ -94,6 +100,7 @@ storage engine ép kiểu như SQL).
 | DTO response (REST thường) | PascalCase + suffix `Response` | `UserResponse`, `MessageResponse` |
 | DTO bắn ra WebSocket | PascalCase + suffix `Public` | `UserPublic`, `MessagePublic` |
 | DTO dùng để cache (Redis) | PascalCase + suffix `Cache` | `UserCache`, `SessionCache` |
+| Payload publish qua outbox (RabbitMQ) | PascalCase + suffix `Message`, đặt trong `base/message/{domain}/` | `QrLoginApprovedMessage` (`base/message/qrlogin/`) |
 | Service class | PascalCase + suffix `Service` | `AuthService`, `MessageService` |
 | Repository | PascalCase + suffix `Repository` | `UserRepository`, `MessageRepository` |
 | Controller | PascalCase + suffix `Controller` | `AuthController`, `MessageController` |

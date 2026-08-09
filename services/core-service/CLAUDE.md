@@ -11,7 +11,10 @@ kiện/lịch hẹn nhóm).
 
 ## Tech stack
 
-Java 25 / Spring Boot 4. PostgreSQL. Redis cho session/OTP/rate-limit login.
+Java 25 / Spring Boot 4. PostgreSQL. Redis cho session/OTP/rate-limit login. RabbitMQ publish
+qua `spring-boot-starter-amqp` (`RabbitTemplate`) — tự publish trong chính service, KHÔNG có
+process/service Go riêng nào làm việc này (xem `skills/outbox-pattern.md`, đổi quyết định
+2026-08-09: bỏ hẳn mô hình Go relay worker tách biệt).
 
 ## API docs
 
@@ -31,8 +34,13 @@ báo tay ở đâu khác.
 - **RabbitMQ publish**: `user.exchange` — `user.registered`, `user.profile_updated`,
   `user.blocked`, `user.new_device_login`, `user.logged_out_all` (WS Gateway subscribe để
   force-disconnect socket đang mở khi logout-all — xem `docs/.../05-cookie-auth-flow.md` E.8;
-  **chưa publish thật, TODO chờ outbox pattern — xem `skills/outbox-pattern.md`**),
-  `friend.request_sent`, `friend.accepted`,
+  **hầu hết vẫn `// TODO(outbox-pattern)` tại call site, CHỈ `user.qr_login_approved` (QR login,
+  xem E.11) đã đi qua outbox thật** — bảng `outbox_events` + `OutboxEventPublisher` (insert,
+  đăng ký publish sau khi commit) + `OutboxDispatcher` (bean riêng thật sự gọi `RabbitTemplate`,
+  tránh lỗi self-invocation bỏ qua proxy `@Transactional`) + `OutboxRetryJob` (`@Scheduled`, quét
+  lại `status=PENDING` làm lưới an toàn) đã hoạt động — tất cả nằm trong chính core-service,
+  không có process/service nào khác. Các event TODO khác chưa được migrate sang cùng đợt — xem
+  `skills/outbox-pattern.md`), `friend.request_sent`, `friend.accepted`,
   `friend.removed`, `user.block_set`, `user.block_removed` · `group.exchange` — `group.member_joined`, `group.member_removed`,
   `group.role_changed`, `group.join_request`, `group.deleted`, `group.event_created`,
   `group.event_reminder`.
@@ -61,13 +69,39 @@ com.chatapp.core/
 ├── CoreServiceApplication.java
 ├── base/                      # hạ tầng dùng chung — KHÔNG phải 1 domain nghiệp vụ
 │   ├── entity/                 # UserEntity, UserSessionEntity, TwoFactorMethodEntity, OtpCodeEntity,
-│   │                            # FriendshipEntity, UserBlockEntity, CloseFriendEntity/CloseFriendId...
+│   │                            # FriendshipEntity, UserBlockEntity, CloseFriendEntity/CloseFriendId,
+│   │                            # OutboxEventEntity (bảng outbox_events, xem skills/outbox-pattern.md)...
 │   ├── repository/             # UserRepository, UserSessionRepository, TwoFactorMethodRepository,
-│   │                            # FriendshipRepository, UserBlockRepository, CloseFriendRepository...
+│   │                            # FriendshipRepository, UserBlockRepository, CloseFriendRepository,
+│   │                            # OutboxEventRepository (insert lúc publish() + đọc PENDING trong
+│   │                            # chính OutboxRetryJob, không có service/process nào khác đọc bảng này)...
 │   ├── constant/                # TwoFactorMethod, OtpPurpose, FriendshipStatus (+ converter tương ứng
 │   │                            # mỗi enum — số cố định gán tay, xem skills/naming-conventions.md #3),
-│   │                            # RedisKeys, RoutingKeys
+│   │                            # OutboxEventStatus (PENDING/PUBLISHED/FAILED, lưu chuỗi giống
+│   │                            # LoginAuditEventType), RedisKeys, RabbitConstant (2 hằng số
+│   │                            # String PHẲNG/event: `_EXCHANGE`/`_ROUTING_KEY` — KHÔNG có
+│   │                            # `_QUEUE`, khai báo/bind queue là việc của consumer, không phải
+│   │                            # publisher)
+│   ├── message/                 # payload class cho MỌI event publish qua OutboxEventPublisher —
+│   │   │                          tên lớp LUÔN kết thúc bằng "Message", CHỈ chứa field thật sự
+│   │   │                          gửi đi trong JSON (không nhét field nội bộ như user_id vào
+│   │   │                          đây — field đó truyền thẳng qua tham số aggregateId/
+│   │   │                          aggregateType của publish(), xem OutboxEventPublisher.java) —
+│   │   │                          1 subfolder/domain, KHÔNG gộp chung 1 file (message/qrlogin/ làm mẫu)
+│   │   └── qrlogin/
+│   │       └── QrLoginApprovedMessage.java   # chỉ có field qrToken
 │   ├── config/                  # JwtProperties, OtpProperties, TotpProperties, PasswordEncoderConfig
+│   ├── OutboxEventPublisher.java  # publish(exchange, routingKey, aggregateId, aggregateType,
+│   │                            # payload) — 5 tham số tường minh, không gói vào 1 interface/
+│   │                            # record trung gian (chỉ 1 message hiện có, thêm abstraction
+│   │                            # sớm không đáng). Insert outbox_events trong transaction hiện
+│   │                            # tại của caller, đăng ký publish ngay sau khi transaction đó
+│   │                            # commit — entry point duy nhất cho outbox pattern, không publish
+│   │                            # RabbitMQ trực tiếp ở đâu khác (skills/outbox-pattern.md)
+│   ├── OutboxDispatcher.java      # bean riêng thật sự gọi RabbitTemplate + update status — tách
+│   │                            # khỏi OutboxEventPublisher để tránh self-invocation bỏ qua
+│   │                            # proxy @Transactional; dùng chung bởi cả publish ngay lẫn
+│   │                            # scheduler/OutboxRetryJob.java
 │   ├── UserResponse.java         # public user DTO (id/username/displayName/avatarUrl) — dùng chung
 │   │                            # cho auth/ VÀ friend/, không phải bản riêng của domain nào
 │   └── ApiResponse.java, ApiError.java   # response envelope chung cho MỌI endpoint (trừ /health)
@@ -88,6 +122,14 @@ com.chatapp.core/
 │       │                          (GoogleOAuthStrategy.java — thêm Facebook/Apple sau chỉ cần
 │       │                          thêm 1 class impl mới, không sửa Dispatcher/Controller/Service)
 │       └── dto/                 # OAuthUserInfo (record chuẩn hoá output mọi strategy), request/
+│   └── qrlogin/                # QR login (WhatsApp-style, xem docs/.../05-cookie-auth-flow.md
+│       │                          E.11) — thiết bị cũ confirm thay thế 2FA cho thiết bị mới,
+│       │                          KHÔNG qua completeLogin(). Redis-only state (giống
+│       │                          PreAuthTokenService), không có Entity/Repository riêng.
+│       ├── QrLoginController.java, QrLoginService.java (interface) / service/QrLoginServiceImpl.java
+│       ├── service/QrLoginSessionService.java   # Redis-only, cache:qr_login:{qr_token}
+│       └── dto/response/                          # outbox payload KHÔNG nằm ở đây — xem
+│                                                    # base/message/qrlogin/QrLoginApprovedMessage.java
 ├── twofactor/                 # strategy verify theo method (TOTP/EMAIL, SMS chưa làm) + luồng bật
 │   │                            # 2FA (/2fa/*) — cũng KHÔNG có Entity/Repository riêng
 │   ├── TwoFactorSettingsController.java / TwoFactorSettingsService.java
@@ -112,6 +154,9 @@ com.chatapp.core/
 ├── security/                  # JwtKeyManager, JwtTokenProvider, JwksController — chỉ còn đúng phần
 │                              # ký/verify JWT thật, không chứa Entity/Config (đã dời sang base/)
 ├── grpc/                      # IdentityGrpcService, GroupGrpcService (expose sau)
+├── scheduler/                 # @Scheduled job — hiện chỉ OutboxRetryJob.java (lưới an toàn cho
+│                              # outbox pattern, xem base/OutboxEventPublisher). Job mới sau này
+│                              # (dọn rác, nhắc lịch group event...) cũng vào đây, KHÔNG để trong base/.
 └── exception/                 # GlobalExceptionHandler + custom exception
     └── common/                 # AppException + ErrorCode — pattern cho lỗi MỚI từ giờ trở đi
                                  # (xem mục "Lưu ý khi code" #14), auth/2FA cũ vẫn giữ nguyên

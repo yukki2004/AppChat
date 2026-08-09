@@ -32,6 +32,17 @@ service cùng lúc, ở 2 terminal riêng:
 ./scripts/run-service.sh api-gateway      # terminal 2 — port 8080
 ```
 
+Muốn test thêm **QR login** (section 11 test-client) thì chạy thêm `realtime-gateway` ở 1
+terminal thứ 3:
+
+```bash
+./scripts/run-service.sh realtime-gateway  # terminal 3 — port 8081, WS
+```
+
+Test-client kết nối WS thẳng tới `realtime-gateway` (`ws://localhost:8081`), KHÔNG qua
+`api-gateway` (api-gateway không xử lý WS) — thiếu service này thì phần "Tạo QR + mở WS chờ" ở
+section 11 sẽ báo lỗi WS, các phần khác của test-client vẫn chạy bình thường.
+
 ### GeoIP (tuỳ chọn, không bắt buộc để chạy được)
 
 `core-service` resolve `login_country`/`login_city` từ IP lúc login bằng file MaxMind
@@ -81,7 +92,7 @@ lại đúng như 1 client thật.
 
 ## Service chưa test được qua luồng này
 
-`messaging-service`, `social-service`, `call-service`, `notification-service`,
-`realtime-gateway`, `media-service` — có thể khởi động qua `run-service.sh` nhưng chưa có
-route/luồng nghiệp vụ nào implement để test qua test-client (chỉ auth/2FA của `core-service` +
-`api-gateway` đã code xong tính tới thời điểm này).
+`messaging-service`, `social-service`, `call-service`, `notification-service`, `media-service` —
+có thể khởi động qua `run-service.sh` nhưng chưa có route/luồng nghiệp vụ nào implement để test
+qua test-client. `realtime-gateway` giờ test được qua section 11 (QR login) — xem ghi chú ở
+Bước 2 và mục "Testing QR login" trong `test-client/README.md`.

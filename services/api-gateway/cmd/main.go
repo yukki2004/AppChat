@@ -39,9 +39,14 @@ func main() {
 
 	app := fiber.New(fiber.Config{DisableStartupMessage: true})
 
+	corsOrigins := "http://localhost:5500,http://127.0.0.1:5500"
+	if cfg.CORSExtraOrigins != "" {
+		corsOrigins += "," + cfg.CORSExtraOrigins
+	}
+
 	app.Use(requestid.New())
 	app.Use(cors.New(cors.Config{
-		AllowOrigins:     "http://localhost:5500,http://127.0.0.1:5500",
+		AllowOrigins:     corsOrigins,
 		AllowCredentials: true,
 		AllowHeaders: "Content-Type,X-Forwarded-For",
 	}))
@@ -74,6 +79,13 @@ func main() {
 	app.Post("/auth/password/forgot", forward)
 	app.Post("/auth/password/forgot/verify", forward)
 	app.Post("/auth/password/reset", forward)
+	// Also public: QR login — the NEW device has no session yet by definition. /confirm and
+	// /device-info ARE protected below (called by the ALREADY-logged-in device that scanned the
+	// QR); /claim stays public because the new device that calls it still has no access_token
+	// until this call succeeds (same shape as /auth/login itself).
+	app.Post("/auth/qr-login/init", forward)
+	app.Get("/auth/qr-login/:qrToken/status", forward)
+	app.Post("/auth/qr-login/:qrToken/claim", forward)
 
 	// Protected — requires a verified access_token, forwarded downstream as X-User-Id.
 	app.Post("/2fa/totp/setup", authRequired, forward)
@@ -89,6 +101,8 @@ func main() {
 	app.Post("/auth/password/set", authRequired, forward)
 	app.Post("/auth/link/otp", authRequired, forward)
 	app.Post("/auth/link/verify", authRequired, forward)
+	app.Get("/auth/qr-login/:qrToken/device-info", authRequired, forward)
+	app.Post("/auth/qr-login/:qrToken/confirm", authRequired, forward)
 
 	log.Printf("api-gateway starting on :%s (env=%s, core_service=%s)", cfg.Port, cfg.Env, cfg.CoreServiceURL)
 	if err := app.Listen(":" + cfg.Port); err != nil {

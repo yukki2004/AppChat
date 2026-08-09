@@ -21,6 +21,9 @@ type Config struct {
 	RedisPort      string `mapstructure:"redis_port"`
 	RedisPassword  string `mapstructure:"redis_password"`
 	CookieDomain   string `mapstructure:"cookie_domain"`
+	// Comma-separated extra CORS origins beyond the fixed localhost:5500 ones — e.g. to test
+	// test-client from a phone on the same LAN. See config/base.yaml for the env var.
+	CORSExtraOrigins string `mapstructure:"cors_extra_origins"`
 }
 
 func Load() (*Config, error) {

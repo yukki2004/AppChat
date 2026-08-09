@@ -56,7 +56,8 @@ func main() {
 
 	// Public — no access_token needed yet (these ARE the auth flow that produces one).
 	app.Get("/.well-known/jwks.json", forward)
-	app.Post("/auth/register", forward)
+	app.Post("/auth/register/otp", forward)
+	app.Post("/auth/register/verify", forward)
 	app.Post("/auth/login", forward)
 	app.Post("/auth/login/2fa/challenge", forward)
 	app.Post("/auth/login/2fa", forward)

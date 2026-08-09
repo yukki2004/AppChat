@@ -64,7 +64,8 @@ Core Service để gọi).
   phẳng kiểu cũ) — client dựa vào code này để biết nên gọi `/auth/refresh` hay bắt đăng nhập lại.
 - Timeout cứng 30s mỗi upstream call, trả 504 nếu vượt — không để request treo vô hạn. (Chưa
   code — xem mục "Chưa code" ở trên.)
-- Route `/auth/register`, `/auth/login`, `/auth/login/2fa/challenge`, `/auth/login/2fa`,
-  `/auth/oauth/:provider/callback` không cần verify JWT trước khi forward (đây chính là luồng
-  TẠO ra access_token, chưa có gì để verify) — các route còn lại mặc định coi là cần auth trừ
-  khi liệt kê rõ là public trong route table.
+- Route `/auth/register/otp`, `/auth/register/verify`, `/auth/login`, `/auth/login/2fa/challenge`,
+  `/auth/login/2fa`, `/auth/oauth/:provider/callback` không cần verify JWT trước khi forward (đây
+  chính là luồng TẠO ra access_token, chưa có gì để verify — `/auth/register/verify` cũng phát
+  token thật ngay khi verify đúng, giống hệt login) — các route còn lại mặc định coi là cần auth
+  trừ khi liệt kê rõ là public trong route table.

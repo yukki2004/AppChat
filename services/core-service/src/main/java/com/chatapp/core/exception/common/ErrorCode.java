@@ -41,10 +41,12 @@ public enum ErrorCode {
     // auth/login (POST /auth/login) — 5 consecutive wrong passwords -> 30 min lockout
     ACCOUNT_TEMP_LOCKED(3004, "Too many failed login attempts — try again in 30 minutes", HttpStatus.TOO_MANY_REQUESTS),
 
-    // auth/register (POST /auth/register)
+    // auth/register (POST /auth/register/otp, /auth/register/verify)
     USERNAME_ALREADY_EXISTS(4001, "Username already exists", HttpStatus.CONFLICT),
     EMAIL_ALREADY_EXISTS(4002, "Email is already registered", HttpStatus.CONFLICT),
     PHONE_ALREADY_EXISTS(4003, "Phone number is already registered", HttpStatus.CONFLICT),
+    REGISTER_CODE_INVALID(4004, "Invalid or expired verification code", HttpStatus.BAD_REQUEST),
+    REGISTER_SESSION_EXPIRED(4005, "Registration session expired — start over", HttpStatus.BAD_REQUEST),
 
     // auth/login + 2FA challenge/submit (POST /auth/login, /auth/login/2fa/challenge, /auth/login/2fa)
     INVALID_CREDENTIALS(4011, "Invalid username/email/phone or password", HttpStatus.UNAUTHORIZED),

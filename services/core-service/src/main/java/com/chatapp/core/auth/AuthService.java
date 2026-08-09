@@ -5,16 +5,23 @@ import java.util.UUID;
 
 import com.chatapp.core.auth.dto.request.LoginRequest;
 import com.chatapp.core.auth.dto.request.RegisterRequest;
+import com.chatapp.core.auth.dto.request.RegisterVerifyRequest;
 import com.chatapp.core.auth.dto.response.SessionResponse;
 import com.chatapp.core.auth.dto.response.TwoFactorChallengeAckResponse;
 import com.chatapp.core.auth.result.AuthResult;
 import com.chatapp.core.auth.result.LoginOutcome;
-import com.chatapp.core.base.UserResponse;
 import com.chatapp.core.base.entity.UserEntity;
 
 public interface AuthService {
 
-    UserResponse register(RegisterRequest request);
+    /** Step 1 of register — validates uniqueness, stashes the pending account in Redis, sends
+     *  an OTP to the one identifier provided. Does NOT create a user row yet. */
+    void registerStart(RegisterRequest request);
+
+    /** Step 2 of register — verifies the OTP, creates the user (identifier marked verified),
+     *  and logs them in immediately (same shape as password login: 2FA can't be enabled yet on
+     *  a brand new account, but reusing completeLogin keeps this consistent if that ever changes). */
+    LoginOutcome registerVerify(RegisterVerifyRequest request, String ipAddress, String userAgent);
 
     LoginOutcome login(LoginRequest request, String ipAddress, String userAgent);
 

@@ -24,6 +24,7 @@ import com.chatapp.core.auth.dto.request.ForgotPasswordRequest;
 import com.chatapp.core.auth.dto.request.ForgotPasswordVerifyRequest;
 import com.chatapp.core.auth.dto.request.LoginRequest;
 import com.chatapp.core.auth.dto.request.RegisterRequest;
+import com.chatapp.core.auth.dto.request.RegisterVerifyRequest;
 import com.chatapp.core.auth.dto.request.ResetPasswordRequest;
 import com.chatapp.core.auth.dto.request.SetPasswordRequest;
 import com.chatapp.core.auth.dto.request.TwoFactorChallengeRequest;
@@ -71,9 +72,32 @@ public class AuthController {
     private final AuthService authService;
     private final AuthCookieBuilder cookieBuilder;
 
-    @PostMapping("/auth/register")
-    public ResponseEntity<ApiResponse<UserResponse>> register(@Valid @RequestBody RegisterRequest request) {
-        return ResponseEntity.ok(ApiResponse.ok(authService.register(request)));
+    @PostMapping("/auth/register/otp")
+    public ResponseEntity<ApiResponse<Void>> registerStart(@Valid @RequestBody RegisterRequest request) {
+        authService.registerStart(request);
+        return ResponseEntity.ok(ApiResponse.ok());
+    }
+
+    @PostMapping("/auth/register/verify")
+    public ResponseEntity<ApiResponse<?>> registerVerify(
+            @Valid @RequestBody RegisterVerifyRequest request,
+            @RequestHeader(value = "User-Agent", required = false) String userAgent,
+            @RequestHeader(value = "X-Client-IP", required = false) String clientIp) {
+        LoginOutcome outcome = authService.registerVerify(request, clientIp, userAgent);
+
+        if (outcome instanceof TwoFactorChallengeResult challenge) {
+            ResponseCookie preAuthCookie = cookieBuilder.buildCookie(
+                    PRE_AUTH_COOKIE_NAME, challenge.preAuthToken(), PRE_AUTH_COOKIE_PATH, challenge.preAuthTokenTtlSeconds());
+            TwoFactorRequiredResponse body = new TwoFactorRequiredResponse(true, challenge.availableMethods());
+            return ResponseEntity.ok()
+                    .header(HttpHeaders.SET_COOKIE, preAuthCookie.toString())
+                    .body(ApiResponse.ok(body));
+        }
+
+        AuthResult result = (AuthResult) outcome;
+        return ResponseEntity.ok()
+                .header(HttpHeaders.SET_COOKIE, cookieBuilder.buildAccessRefreshCookies(result))
+                .body(ApiResponse.ok(result.user()));
     }
 
     @PostMapping("/auth/login")

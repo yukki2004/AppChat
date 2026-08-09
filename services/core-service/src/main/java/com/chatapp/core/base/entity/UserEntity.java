@@ -109,4 +109,12 @@ public class UserEntity {
     public void changePassword(String newPasswordHash) {
         this.passwordHash = newPasswordHash;
     }
+
+    public void markEmailVerified() {
+        this.emailVerifiedAt = Instant.now();
+    }
+
+    public void markPhoneVerified() {
+        this.phoneVerifiedAt = Instant.now();
+    }
 }

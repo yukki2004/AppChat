@@ -16,8 +16,8 @@
 |  |  |  |
 | :-: | :-: | :-: |
 | **#** | **Chức năng** | **Mô tả nghiệp vụ chi tiết** |
-| **1** | **Đăng ký bằng Email** | Nhập email + password → gửi OTP email → xác minh → tạo user + session cookie. |
-| **2** | **Đăng ký bằng SĐT** | Nhập phone → gửi OTP SMS → xác minh → tạo user. |
+| **1** | **Đăng ký bằng Email** | `POST /auth/register/otp` (username/password/displayName + email, KHÔNG kèm phone — email XOR phone bắt buộc) → validate trùng username/email → lưu tạm payload ở Redis (`cache:pending_register:{email}`, TTL = OTP TTL) → gửi OTP email (`OtpPurpose.REGISTER`, `user_id=NULL` vì user chưa tồn tại) → `POST /auth/register/verify` verify đúng mã mới thật sự tạo user (`email_verified_at=now()`) + session cookie. Sai mã/hết hạn → không tạo gì cả, không có user "chưa verify" nằm trong DB. |
+| **2** | **Đăng ký bằng SĐT** | Y hệt #1, khác kênh: gửi OTP SMS (hiện SMS chưa có provider thật, tạm log ra thay vì gọi API thật — xem `OtpSmsSender`) thay vì email, verify xong set `phone_verified_at=now()`. |
 | **3** | **Đăng nhập Email/SĐT + Password** | Verify password hash (BCrypt) → tạo session → set cookie. Ghi login_audit_logs. |
 | **4** | **OAuth2 – Google** | Redirect Google consent → callback → upsert user_oauth_providers → session cookie. |
 | **5** | **OAuth2 – Facebook** | Tương tự Google. Provider = FACEBOOK. |

@@ -51,12 +51,22 @@
 </details>
 
 <details open class="step">
-  <summary>1. Đăng ký</summary>
+  <summary>1. Đăng ký (2 bước — email XOR sđt, không được điền cả 2)</summary>
   <input id="reg-username" placeholder="username" value="demo1" />
-  <input id="reg-email" placeholder="email" value="demo1@test.com" />
+  <input id="reg-email" placeholder="email (để trống nếu dùng sđt)" value="demo1@test.com" />
+  <input id="reg-phone" placeholder="sđt +84... (để trống nếu dùng email)" />
   <input id="reg-password" placeholder="mật khẩu" value="password123" type="password" />
   <input id="reg-displayname" placeholder="tên hiển thị" value="Demo One" />
-  <button onclick="register()">Đăng ký</button>
+  <button onclick="registerStart()">1a. Gửi OTP đăng ký</button>
+  <p>Điền cả email lẫn sđt cùng lúc sẽ bị chặn ngay ở bước này (400 VALIDATION_ERROR) — thử điền
+  cả 2 để tự kiểm chứng. Email thì mã OTP gửi thật qua mail; sđt thì hiện chưa có provider SMS
+  thật, mã chỉ log ra console log của core-service (xem <code>OtpSmsSender</code>), copy mã đó
+  dán vào ô dưới.</p>
+  <div class="row">
+    <input id="reg-verify-target" placeholder="email/sđt vừa đăng ký (giống hệt ở trên)" value="demo1@test.com" />
+    <input id="reg-verify-code" placeholder="mã OTP" />
+  </div>
+  <button onclick="registerVerify()">1b. Xác thực OTP → tạo tài khoản</button>
 </details>
 
 <details open class="step">
@@ -246,12 +256,20 @@ function log(text, ok) {
   if (ok !== undefined) el.classList.add(ok ? 'ok' : 'err');
 }
 
-function register() {
-  return call('POST', '/auth/register', {
+function registerStart() {
+  return call('POST', '/auth/register/otp', {
     username: val('reg-username'),
-    email: val('reg-email'),
+    email: val('reg-email') || null,
+    phone: val('reg-phone') || null,
     password: val('reg-password'),
     display_name: val('reg-displayname'),
+  });
+}
+
+function registerVerify() {
+  return call('POST', '/auth/register/verify', {
+    target: val('reg-verify-target'),
+    code: val('reg-verify-code'),
   });
 }
 

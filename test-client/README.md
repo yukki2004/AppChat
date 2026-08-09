@@ -69,6 +69,17 @@ stored and sent back by the browser, exactly like a real client would.
   refresh_token for each other session at once — no immediate per-jti blacklist there since
   it's not acting on 1 known session.
 
+## Testing register (section 1)
+
+- Registration is 2-step: `/auth/register/otp` (validates uniqueness, stashes the pending account
+  in Redis, sends an OTP) then `/auth/register/verify` (verifies the OTP, only then actually
+  creates the row + logs in). No user row exists in between — a wrong/expired code just leaves
+  nothing behind, no cleanup needed.
+- Email XOR phone is enforced server-side (`RegisterRequest.isExactlyOneOfEmailOrPhoneProvided`)
+  — filling both (or leaving both blank) gets rejected with 400 `VALIDATION_ERROR` before any
+  business logic runs, regardless of what calls the API (this page, curl, Postman). Try it in
+  section 1 to see the 400 firsthand.
+
 ## Testing forgot password (section 8)
 
 - Step 1 (`/auth/password/forgot`) always returns 200 whether or not the email is registered —
@@ -80,8 +91,9 @@ stored and sent back by the browser, exactly like a real client would.
   just click step 3's button right after step 2 succeeds and the browser sends it automatically.
 - Step 3 clears the `reset_token` cookie and revokes every existing session for that account
   (same as change password) — log in again with the new password afterward.
-- Phone/SMS isn't wired up yet (no SMS sender implemented anywhere in the service) — email only
-  for now.
+- Phone/SMS OTP delivery (register, 2FA later) goes through `OtpSmsSender` — no real provider
+  chosen yet, it just logs the code to core-service's own console/log output instead of sending a
+  real SMS. Copy the code from there when testing a phone-based flow.
 
 ## Testing Google OAuth login (section 2b)
 

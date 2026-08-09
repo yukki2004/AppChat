@@ -16,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.chatapp.core.auth.AuthService;
 import com.chatapp.core.auth.dto.request.LoginRequest;
 import com.chatapp.core.auth.dto.request.RegisterRequest;
+import com.chatapp.core.auth.dto.request.RegisterVerifyRequest;
 import com.chatapp.core.auth.dto.response.SessionResponse;
 import com.chatapp.core.auth.dto.response.TwoFactorChallengeAckResponse;
 import com.chatapp.core.auth.result.AuthResult;
@@ -28,6 +29,7 @@ import com.chatapp.core.base.constant.LoginAuditEventType;
 import com.chatapp.core.base.constant.OtpPurpose;
 import com.chatapp.core.base.constant.RedisKeys;
 import com.chatapp.core.base.constant.TwoFactorMethod;
+import com.chatapp.core.base.config.OtpProperties;
 import com.chatapp.core.base.entity.TwoFactorMethodEntity;
 import com.chatapp.core.base.entity.UserEntity;
 import com.chatapp.core.base.entity.UserSessionEntity;
@@ -43,7 +45,9 @@ import com.chatapp.core.security.JwtTokenProvider;
 import com.chatapp.core.twofactor.backupcode.TwoFactorBackupCodeService;
 import com.chatapp.core.twofactor.otp.OtpCodeService;
 import com.chatapp.core.twofactor.otp.OtpMailSender;
+import com.chatapp.core.twofactor.otp.OtpSmsSender;
 import com.chatapp.core.twofactor.strategy.TwoFactorChallengeDispatcher;
+import org.springframework.dao.DataIntegrityViolationException;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -78,33 +82,91 @@ public class AuthServiceImpl implements AuthService {
     private final GeoIpService geoIpService;
     private final LoginAuditLogService loginAuditLogService;
     private final StringRedisTemplate redisTemplate;
+    private final PendingRegistrationService pendingRegistrationService;
+    private final OtpSmsSender otpSmsSender;
+    private final OtpProperties otpProperties;
 
     @Override
     @Transactional
-    public UserResponse register(RegisterRequest request) {
-        log.debug("register start username={} hasEmail={} hasPhone={}",
+    public void registerStart(RegisterRequest request) {
+        log.debug("registerStart start username={} hasEmail={} hasPhone={}",
                 request.getUsername(), request.getEmail() != null, request.getPhone() != null);
 
+        String target = request.getEmail() != null ? request.getEmail() : request.getPhone();
+
         if (userRepository.existsByUsername(request.getUsername())) {
-            log.warn("register rejected username={} reason=USERNAME_TAKEN", request.getUsername());
+            log.warn("registerStart rejected username={} reason=USERNAME_TAKEN", request.getUsername());
             throw new AppException(ErrorCode.USERNAME_ALREADY_EXISTS);
         }
         if (request.getEmail() != null && userRepository.existsByEmail(request.getEmail())) {
-            log.warn("register rejected username={} reason=EMAIL_TAKEN", request.getUsername());
+            log.warn("registerStart rejected username={} reason=EMAIL_TAKEN", request.getUsername());
             throw new AppException(ErrorCode.EMAIL_ALREADY_EXISTS);
         }
         if (request.getPhone() != null && userRepository.existsByPhone(request.getPhone())) {
-            log.warn("register rejected username={} reason=PHONE_TAKEN", request.getUsername());
+            log.warn("registerStart rejected username={} reason=PHONE_TAKEN", request.getUsername());
             throw new AppException(ErrorCode.PHONE_ALREADY_EXISTS);
         }
 
         String passwordHash = passwordEncoder.encode(request.getPassword());
-        UserEntity user = new UserEntity(
+        PendingRegistration pending = new PendingRegistration(
                 request.getUsername(), request.getEmail(), request.getPhone(), passwordHash, request.getDisplayName());
-        UserEntity saved = userRepository.save(user);
+        pendingRegistrationService.save(target, pending, otpProperties.getCodeTtlSeconds());
 
-        log.info("register success userId={} username={}", saved.getId(), saved.getUsername());
-        return UserResponse.from(saved);
+        String code = otpCodeService.generate(target, OtpPurpose.REGISTER, null);
+        if (request.getEmail() != null) {
+            otpMailSender.send(target, code);
+        } else {
+            otpSmsSender.send(target, code);
+        }
+        log.info("registerStart code sent username={} target={}", request.getUsername(), target);
+    }
+
+    @Override
+    @Transactional
+    public LoginOutcome registerVerify(RegisterVerifyRequest request, String ipAddress, String userAgent) {
+        String target = request.getTarget();
+        log.debug("registerVerify start target={}", target);
+
+        if (!otpCodeService.verify(target, OtpPurpose.REGISTER, null, request.getCode())) {
+            log.warn("registerVerify failed target={} reason=INVALID_CODE", target);
+            throw new AppException(ErrorCode.REGISTER_CODE_INVALID);
+        }
+
+        PendingRegistration pending = pendingRegistrationService.get(target)
+                .orElseThrow(() -> {
+                    log.warn("registerVerify failed target={} reason=PENDING_DATA_EXPIRED", target);
+                    return new AppException(ErrorCode.REGISTER_SESSION_EXPIRED);
+                });
+
+        UserEntity user = new UserEntity(
+                pending.username(), pending.email(), pending.phone(), pending.passwordHash(), pending.displayName());
+        if (pending.email() != null) {
+            user.markEmailVerified();
+        } else {
+            user.markPhoneVerified();
+        }
+
+        UserEntity saved;
+        try {
+            saved = userRepository.saveAndFlush(user);
+        } catch (DataIntegrityViolationException e) {
+            // Race: another registration took the same username/email/phone between
+            // registerStart's uniqueness check and this insert — see CLAUDE.md "Lưu ý khi code"
+            // #14 (FriendRequestResolver.insertNew() uses the same saveAndFlush() pattern).
+            pendingRegistrationService.delete(target);
+            log.warn("registerVerify failed target={} reason=UNIQUE_CONSTRAINT_RACE", target);
+            if (userRepository.existsByUsername(pending.username())) {
+                throw new AppException(ErrorCode.USERNAME_ALREADY_EXISTS);
+            }
+            if (pending.email() != null && userRepository.existsByEmail(pending.email())) {
+                throw new AppException(ErrorCode.EMAIL_ALREADY_EXISTS);
+            }
+            throw new AppException(ErrorCode.PHONE_ALREADY_EXISTS);
+        }
+
+        pendingRegistrationService.delete(target);
+        log.info("registerVerify success userId={} username={}", saved.getId(), saved.getUsername());
+        return completeLogin(saved, ipAddress, userAgent);
     }
 
     @Override

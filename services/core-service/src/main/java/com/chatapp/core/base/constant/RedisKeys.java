@@ -52,6 +52,11 @@ public final class RedisKeys {
     }
 
 
+    public static String pendingRegister(String target) {
+        return "cache:pending_register:" + target;
+    }
+
+
     public static String loginFailCount(UUID userId) {
         return "cache:login_fail_count:" + userId;
     }

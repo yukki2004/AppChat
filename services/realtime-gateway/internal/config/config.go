@@ -1,6 +1,4 @@
-// Package config nạp cấu hình 4 tầng: config/base.yaml (default chung) bị đè bởi
-// config/{APP_ENV}.yaml (dev/stg/prod), sau cùng biến môi trường (prefix APP_) đè lên tất cả —
-// dùng cho giá trị nhạy cảm (password, connection string) không nằm trong file yaml.
+
 package config
 
 import (
@@ -15,6 +13,8 @@ type Config struct {
 	Env      string
 	Port     string `mapstructure:"port"`
 	LogLevel string `mapstructure:"log_level"`
+	RedisAddr   string `mapstructure:"redis_addr"`
+	RabbitMQURL string `mapstructure:"rabbitmq_url"`
 }
 
 func Load() (*Config, error) {
@@ -45,6 +45,13 @@ func Load() (*Config, error) {
 	base.SetEnvPrefix("APP")
 	base.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	base.AutomaticEnv()
+
+
+	for _, key := range []string{"redis_addr", "rabbitmq_url"} {
+		if err := base.BindEnv(key); err != nil {
+			return nil, fmt.Errorf("bind env for %s: %w", key, err)
+		}
+	}
 
 	var cfg Config
 	if err := base.Unmarshal(&cfg); err != nil {

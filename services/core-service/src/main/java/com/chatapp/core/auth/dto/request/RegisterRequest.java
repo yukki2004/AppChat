@@ -8,7 +8,10 @@ import jakarta.validation.constraints.Size;
 import lombok.Getter;
 import lombok.Setter;
 
-/** Register with email OR phone (at least one) — see {@link #isEmailOrPhoneProvided()}. */
+/** Register with email XOR phone — exactly one, never both, never neither. See conversation
+ *  decision: registration verifies exactly one channel by OTP; adding the other channel later
+ *  is a separate "link identifier" flow with its own verification step, not a second OTP fired
+ *  off during registration. See {@link #isExactlyOneOfEmailOrPhoneProvided()}. */
 @Getter
 @Setter
 public class RegisterRequest {
@@ -31,8 +34,10 @@ public class RegisterRequest {
     @Size(max = 100)
     private String displayName;
 
-    @AssertTrue(message = "Either email or phone must be provided")
-    public boolean isEmailOrPhoneProvided() {
-        return (email != null && !email.isBlank()) || (phone != null && !phone.isBlank());
+    @AssertTrue(message = "Provide exactly one of email or phone, not both")
+    public boolean isExactlyOneOfEmailOrPhoneProvided() {
+        boolean hasEmail = email != null && !email.isBlank();
+        boolean hasPhone = phone != null && !phone.isBlank();
+        return hasEmail ^ hasPhone;
     }
 }

@@ -42,6 +42,14 @@ public interface AuthService {
 
     AuthResult refreshToken(String refreshToken, String ipAddress, String userAgent);
 
+    /** Issues real tokens for {@code userId} directly, bypassing completeLogin()/2FA entirely —
+     *  ONLY safe to call from a flow where identity + 2FA-equivalent trust was already
+     *  established some other way. Used by QR login: the already-logged-in device confirming
+     *  the request IS the 2FA-equivalent step for the new device, so making the new device also
+     *  pass 2FA again would be redundant and defeats the point of the feature. Never call this
+     *  from a path where the caller hasn't independently verified the user's identity first. */
+    AuthResult issueTokensForDevice(UUID userId, String ipAddress, String userAgent);
+
     void logout(String refreshToken, String accessToken, String ipAddress, String userAgent);
 
     List<SessionResponse> listSessions(UUID userId, String currentRefreshToken);

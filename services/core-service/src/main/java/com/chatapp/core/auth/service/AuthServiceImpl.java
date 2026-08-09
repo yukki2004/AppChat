@@ -418,6 +418,21 @@ public class AuthServiceImpl implements AuthService {
         return issueTokens(user, session, ipAddress, userAgent);
     }
 
+    @Override
+    @Transactional
+    public AuthResult issueTokensForDevice(UUID userId, String ipAddress, String userAgent) {
+        log.debug("issueTokensForDevice start userId={} ip={}", userId, ipAddress);
+        UserEntity user = userRepository.findByIdAndDeletedAtIsNull(userId)
+                .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_FOUND));
+        if (user.isBlocked() || !user.isActive()) {
+            log.warn("issueTokensForDevice rejected userId={} reason=ACCOUNT_BLOCKED", userId);
+            throw new AppException(ErrorCode.ACCOUNT_BLOCKED);
+        }
+        AuthResult result = issueTokens(user, ipAddress, userAgent);
+        log.info("issueTokensForDevice success userId={}", userId);
+        return result;
+    }
+
     private void detectReuseAndRevokeAll(String tokenHash, Instant now) {
         userSessionRepository.findByTokenHash(tokenHash)
                 .filter(revoked -> ROTATED_REVOKE_REASON.equals(revoked.getRevokeReason()))
@@ -430,10 +445,9 @@ public class AuthServiceImpl implements AuthService {
                         active.revoke("REFRESH_TOKEN_REUSE_DETECTED");
                     }
                     jwtRevocationService.revokeAllForUser(userId, jwtTokenProvider.getAccessTokenTtlSeconds());
-                    // TODO(outbox-pattern): publish a security-alert event on user.exchange once
-                    // the outbox table + relay worker exist (skills/outbox-pattern.md) so
-                    // Notification Service can warn the user — no direct RabbitMQ publish here
-                    // in the meantime.
+                    // TODO(outbox-pattern): call outboxEventPublisher.publish(...) here so
+                    // Notification Service can warn the user — see QrLoginServiceImpl#confirm()
+                    // for the pattern to follow, not wired up in this method yet.
                 });
     }
 
@@ -542,9 +556,9 @@ public class AuthServiceImpl implements AuthService {
         }
 
         log.info("logoutAll success userId={} revokedSessions={} keepCurrent={}", userId, revokedCount, keepCurrent);
-        // TODO(outbox-pattern): publish `user.logged_out_all` on `user.exchange`
-        // (RoutingKeys.UserExchange.USER_LOGGED_OUT_ALL) once the outbox table + relay worker
-        // exist (skills/outbox-pattern.md) — no direct RabbitMQ publish here in the meantime.
+        // TODO(outbox-pattern): call outboxEventPublisher.publish(RabbitConstant.UserExchange
+        // .USER_LOGGED_OUT_ALL_EXCHANGE/ROUTING_KEY, ...) — not wired up in this method yet, see
+        // QrLoginServiceImpl#confirm() for the pattern to follow.
         // WS Gateway subscribes to this to force-disconnect this user's live sockets; without
         // it, an already-open WS connection keeps working until it happens to reconnect (see
         // docs/.../05-cookie-auth-flow.md E.8).

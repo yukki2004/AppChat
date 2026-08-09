@@ -9,6 +9,7 @@ public final class RedisKeys {
     public static final long PRE_AUTH_TOKEN_TTL_SECONDS = 300;
     public static final long PENDING_TOTP_SECRET_TTL_SECONDS = 600;
     public static final long RESET_PASSWORD_TOKEN_TTL_SECONDS = 600;
+    public static final long QR_LOGIN_TTL_SECONDS = 90;
 
     public static String preAuth(String preAuthToken) {
         return "cache:pre_auth:" + preAuthToken;
@@ -62,6 +63,13 @@ public final class RedisKeys {
 
     public static String pendingRegister(String target) {
         return "cache:pending_register:" + target;
+    }
+
+    /** Holds QrLoginSessionService.State (PENDING/APPROVED + new-device ip/UA + approving
+     *  user_id once confirmed) — realtime-gateway never reads this key directly, it only knows
+     *  the qr_token itself; it learns APPROVED via the user.qr_login_approved RabbitMQ event. */
+    public static String qrLogin(String qrToken) {
+        return "cache:qr_login:" + qrToken;
     }
 
 

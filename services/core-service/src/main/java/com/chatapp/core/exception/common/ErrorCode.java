@@ -88,7 +88,12 @@ public enum ErrorCode {
     // auth/link (POST /auth/link/otp, /auth/link/verify) — add email/phone to an account that
     // registered with only the other one
     LINK_TARGET_ALREADY_SET(8001, "This account already has that identifier set", HttpStatus.CONFLICT),
-    LINK_CODE_INVALID(8002, "Invalid or expired verification code", HttpStatus.BAD_REQUEST);
+    LINK_CODE_INVALID(8002, "Invalid or expired verification code", HttpStatus.BAD_REQUEST),
+
+    // auth/qrlogin (POST /auth/qr-login/init, GET .../device-info, POST .../confirm, .../claim)
+    QR_LOGIN_SESSION_NOT_FOUND(9001, "Invalid or expired QR login session", HttpStatus.UNAUTHORIZED),
+    QR_LOGIN_ALREADY_APPROVED(9002, "This QR login session was already approved", HttpStatus.CONFLICT),
+    QR_LOGIN_NOT_APPROVED_YET(9003, "This QR login session has not been approved yet", HttpStatus.UNAUTHORIZED);
 
     int code;
     String message;

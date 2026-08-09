@@ -14,6 +14,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.chatapp.core.auth.AuthService;
+import com.chatapp.core.auth.dto.request.LinkIdentifierRequest;
+import com.chatapp.core.auth.dto.request.LinkIdentifierVerifyRequest;
 import com.chatapp.core.auth.dto.request.LoginRequest;
 import com.chatapp.core.auth.dto.request.RegisterRequest;
 import com.chatapp.core.auth.dto.request.RegisterVerifyRequest;
@@ -167,6 +169,72 @@ public class AuthServiceImpl implements AuthService {
         pendingRegistrationService.delete(target);
         log.info("registerVerify success userId={} username={}", saved.getId(), saved.getUsername());
         return completeLogin(saved, ipAddress, userAgent);
+    }
+
+    @Override
+    @Transactional
+    public void linkIdentifierStart(UUID userId, LinkIdentifierRequest request) {
+        log.debug("linkIdentifierStart start userId={} hasEmail={} hasPhone={}",
+                userId, request.getEmail() != null, request.getPhone() != null);
+
+        String target = request.getEmail() != null ? request.getEmail() : request.getPhone();
+
+        UserEntity user = userRepository.findByIdAndDeletedAtIsNull(userId)
+                .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_FOUND));
+
+        if (user.getPasswordHash() == null || !passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
+            log.warn("linkIdentifierStart rejected userId={} reason=INVALID_PASSWORD", userId);
+            throw new AppException(ErrorCode.INVALID_PASSWORD);
+        }
+
+        if (request.getEmail() != null) {
+            if (user.getEmail() != null) {
+                log.warn("linkIdentifierStart rejected userId={} reason=EMAIL_ALREADY_SET", userId);
+                throw new AppException(ErrorCode.LINK_TARGET_ALREADY_SET);
+            }
+            if (userRepository.existsByEmail(request.getEmail())) {
+                throw new AppException(ErrorCode.EMAIL_ALREADY_EXISTS);
+            }
+        } else {
+            if (user.getPhone() != null) {
+                log.warn("linkIdentifierStart rejected userId={} reason=PHONE_ALREADY_SET", userId);
+                throw new AppException(ErrorCode.LINK_TARGET_ALREADY_SET);
+            }
+            if (userRepository.existsByPhone(request.getPhone())) {
+                throw new AppException(ErrorCode.PHONE_ALREADY_EXISTS);
+            }
+        }
+
+        String code = otpCodeService.generate(target, OtpPurpose.LINK_IDENTIFIER, userId);
+        if (request.getEmail() != null) {
+            otpMailSender.send(target, code);
+        } else {
+            otpSmsSender.send(target, code);
+        }
+        log.info("linkIdentifierStart code sent userId={} target={}", userId, target);
+    }
+
+    @Override
+    @Transactional
+    public void linkIdentifierVerify(UUID userId, LinkIdentifierVerifyRequest request) {
+        String target = request.getTarget();
+        log.debug("linkIdentifierVerify start userId={} target={}", userId, target);
+
+        if (!otpCodeService.verify(target, OtpPurpose.LINK_IDENTIFIER, userId, request.getCode())) {
+            log.warn("linkIdentifierVerify failed userId={} target={} reason=INVALID_CODE", userId, target);
+            throw new AppException(ErrorCode.LINK_CODE_INVALID);
+        }
+
+        UserEntity user = userRepository.findByIdAndDeletedAtIsNull(userId)
+                .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_FOUND));
+
+        if (target.contains("@")) {
+            user.linkEmail(target);
+        } else {
+            user.linkPhone(target);
+        }
+        userRepository.save(user);
+        log.info("linkIdentifierVerify success userId={} target={}", userId, target);
     }
 
     @Override

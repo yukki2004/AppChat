@@ -69,16 +69,19 @@ stored and sent back by the browser, exactly like a real client would.
   refresh_token for each other session at once — no immediate per-jti blacklist there since
   it's not acting on 1 known session.
 
-## Testing register (section 1)
+## Testing register + link identifier (section 1, 2c)
 
 - Registration is 2-step: `/auth/register/otp` (validates uniqueness, stashes the pending account
   in Redis, sends an OTP) then `/auth/register/verify` (verifies the OTP, only then actually
   creates the row + logs in). No user row exists in between — a wrong/expired code just leaves
   nothing behind, no cleanup needed.
-- Email XOR phone is enforced server-side (`RegisterRequest.isExactlyOneOfEmailOrPhoneProvided`)
-  — filling both (or leaving both blank) gets rejected with 400 `VALIDATION_ERROR` before any
-  business logic runs, regardless of what calls the API (this page, curl, Postman). Try it in
-  section 1 to see the 400 firsthand.
+- Email XOR phone is enforced server-side (`RegisterRequest.isExactlyOneOfEmailOrPhoneProvided`,
+  same for `LinkIdentifierRequest`) — filling both (or leaving both blank) gets rejected with 400
+  `VALIDATION_ERROR` before any business logic runs, regardless of what calls the API (this page,
+  curl, Postman). Try it in section 1 to see the 400 firsthand.
+- Section 2c adds the identifier you *didn't* register with (re-auths via password, target column
+  must currently be NULL) — after it succeeds, log in again in section 2 using the newly-linked
+  identifier; no extra wiring needed since login already looks up by username/email/phone.
 
 ## Testing forgot password (section 8)
 

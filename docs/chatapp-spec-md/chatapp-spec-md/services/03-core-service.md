@@ -46,6 +46,7 @@
 | **28** | **Backup codes 2FA** | Generate 8 backup codes, lưu hash, trả về lúc bật method 2FA đầu tiên. Regenerate được (re-auth password). Dùng thay TOTP/SMS/EMAIL khi mất quyền truy cập method chính. |
 | **29** | **Audit Log truy cập** | Ghi mọi login, logout, đổi password vào login_audit_logs. |
 | **30** | **Report người dùng** | Tạo `reports` (reported_type=USER), rate-limit số report gửi/ngày để chống lạm dụng, publish `user.reported` CHỈ cho kênh admin (không báo cho người bị report — tránh trả thù). Xem mục 3.16. |
+| **31** | **Liên kết thêm Email/SĐT** | Account đăng ký bằng 1 trong 2 (email XOR phone) muốn thêm cái còn lại — KHÔNG làm lúc đăng ký. `POST /auth/link/otp` (X-User-Id, re-auth password + email HOẶC phone, cột đó phải đang NULL) → gửi OTP (`OtpPurpose.LINK_IDENTIFIER`, có `user_id` vì account đã tồn tại) → `POST /auth/link/verify` verify đúng mã → ghi `email`/`phone` + `*_verified_at=now()`. Sau khi liên kết, login được bằng cả 2 định danh (login vốn đã tra cả username/email/phone qua 1 hàm chung, không cần sửa gì thêm). Khác `pending_email` (#7 ghi chú trong CLAUDE.md service) — đó là THAY email đã có, đây là ĐIỀN vào cột đang trống. |
 
 ## **3.2 Naming Convention – Java**
 
@@ -124,6 +125,7 @@ public UUID userId;             // camelCase public field
 | **RESET_PASSWORD** | Đặt lại mật khẩu |
 | **CHANGE_EMAIL** | Đổi email |
 | **ENABLE_2FA** | Xác minh số điện thoại/email trước khi bật làm method 2FA (SMS/EMAIL) — không áp dụng cho TOTP (verify bằng mã app, không qua OTP gửi SMS/email) |
+| **LINK_IDENTIFIER** | Liên kết thêm email/SĐT vào account đã đăng ký bằng cái còn lại (mục 3.1 #31) — khác CHANGE_EMAIL (đó là thay email đã có qua `pending_email`, đây là điền vào cột đang NULL) |
 
 **Enum: PrivacyVisibility**
 

@@ -7,7 +7,11 @@ public enum OtpPurpose {
     LOGIN_2FA(2),
     RESET_PASSWORD(3),
     CHANGE_EMAIL(4),
-    ENABLE_2FA(5);
+    ENABLE_2FA(5),
+    /** Adding email/phone to an account that registered with only the other one — a separate
+     *  flow from CHANGE_EMAIL (that one replaces an existing verified email via pending_email;
+     *  this one fills in a currently-NULL column). See conversation decision on link flow. */
+    LINK_IDENTIFIER(6);
 
     private final int code;
 

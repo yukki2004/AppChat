@@ -68,4 +68,5 @@ Core Service để gọi).
   `/auth/login/2fa`, `/auth/oauth/:provider/callback` không cần verify JWT trước khi forward (đây
   chính là luồng TẠO ra access_token, chưa có gì để verify — `/auth/register/verify` cũng phát
   token thật ngay khi verify đúng, giống hệt login) — các route còn lại mặc định coi là cần auth
-  trừ khi liệt kê rõ là public trong route table.
+  trừ khi liệt kê rõ là public trong route table. `/auth/link/otp`/`/auth/link/verify` PROTECTED
+  bình thường (cần `X-User-Id` — link identifier chỉ áp dụng cho account đã đăng nhập).

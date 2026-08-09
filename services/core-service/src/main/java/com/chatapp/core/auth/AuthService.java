@@ -3,6 +3,8 @@ package com.chatapp.core.auth;
 import java.util.List;
 import java.util.UUID;
 
+import com.chatapp.core.auth.dto.request.LinkIdentifierRequest;
+import com.chatapp.core.auth.dto.request.LinkIdentifierVerifyRequest;
 import com.chatapp.core.auth.dto.request.LoginRequest;
 import com.chatapp.core.auth.dto.request.RegisterRequest;
 import com.chatapp.core.auth.dto.request.RegisterVerifyRequest;
@@ -22,6 +24,13 @@ public interface AuthService {
      *  and logs them in immediately (same shape as password login: 2FA can't be enabled yet on
      *  a brand new account, but reusing completeLogin keeps this consistent if that ever changes). */
     LoginOutcome registerVerify(RegisterVerifyRequest request, String ipAddress, String userAgent);
+
+    /** Step 1 of linking a second identifier onto an existing account — re-auths via password,
+     *  requires the target column (email/phone) currently NULL, sends OTP to the new target. */
+    void linkIdentifierStart(UUID userId, LinkIdentifierRequest request);
+
+    /** Step 2 of linking — verifies the OTP and writes the new email/phone as verified. */
+    void linkIdentifierVerify(UUID userId, LinkIdentifierVerifyRequest request);
 
     LoginOutcome login(LoginRequest request, String ipAddress, String userAgent);
 

@@ -22,6 +22,8 @@ import com.chatapp.core.auth.AuthService;
 import com.chatapp.core.auth.dto.request.ChangePasswordRequest;
 import com.chatapp.core.auth.dto.request.ForgotPasswordRequest;
 import com.chatapp.core.auth.dto.request.ForgotPasswordVerifyRequest;
+import com.chatapp.core.auth.dto.request.LinkIdentifierRequest;
+import com.chatapp.core.auth.dto.request.LinkIdentifierVerifyRequest;
 import com.chatapp.core.auth.dto.request.LoginRequest;
 import com.chatapp.core.auth.dto.request.RegisterRequest;
 import com.chatapp.core.auth.dto.request.RegisterVerifyRequest;
@@ -98,6 +100,22 @@ public class AuthController {
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, cookieBuilder.buildAccessRefreshCookies(result))
                 .body(ApiResponse.ok(result.user()));
+    }
+
+    @PostMapping("/auth/link/otp")
+    public ResponseEntity<ApiResponse<Void>> linkIdentifierStart(
+            @RequestHeader("X-User-Id") UUID userId,
+            @Valid @RequestBody LinkIdentifierRequest request) {
+        authService.linkIdentifierStart(userId, request);
+        return ResponseEntity.ok(ApiResponse.ok());
+    }
+
+    @PostMapping("/auth/link/verify")
+    public ResponseEntity<ApiResponse<Void>> linkIdentifierVerify(
+            @RequestHeader("X-User-Id") UUID userId,
+            @Valid @RequestBody LinkIdentifierVerifyRequest request) {
+        authService.linkIdentifierVerify(userId, request);
+        return ResponseEntity.ok(ApiResponse.ok());
     }
 
     @PostMapping("/auth/login")

@@ -87,6 +87,8 @@ func main() {
 	app.Post("/auth/logout-all", authRequired, forward)
 	app.Put("/auth/password", authRequired, forward)
 	app.Post("/auth/password/set", authRequired, forward)
+	app.Post("/auth/link/otp", authRequired, forward)
+	app.Post("/auth/link/verify", authRequired, forward)
 
 	log.Printf("api-gateway starting on :%s (env=%s, core_service=%s)", cfg.Port, cfg.Env, cfg.CoreServiceURL)
 	if err := app.Listen(":" + cfg.Port); err != nil {

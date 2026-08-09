@@ -117,4 +117,17 @@ public class UserEntity {
     public void markPhoneVerified() {
         this.phoneVerifiedAt = Instant.now();
     }
+
+    /** Fills in a currently-NULL email after the link-identifier OTP flow verifies it — see
+     *  AuthService#linkIdentifierVerify. Not for changing an existing verified email (that's
+     *  the separate pending_email flow, see skill note in core-service CLAUDE.md #7). */
+    public void linkEmail(String email) {
+        this.email = email;
+        this.emailVerifiedAt = Instant.now();
+    }
+
+    public void linkPhone(String phone) {
+        this.phone = phone;
+        this.phoneVerifiedAt = Instant.now();
+    }
 }

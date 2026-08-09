@@ -81,7 +81,12 @@ public enum ErrorCode {
     PASSWORD_ALREADY_SET(7004, "Password is already set — use PUT /auth/password to change it", HttpStatus.CONFLICT),
     // twofactor/ setup (POST /2fa/totp/setup, /2fa/email/setup)
     PASSWORD_REQUIRED_BEFORE_2FA(7005,
-            "Set a password first (POST /auth/password/set) before enabling 2FA", HttpStatus.BAD_REQUEST);
+            "Set a password first (POST /auth/password/set) before enabling 2FA", HttpStatus.BAD_REQUEST),
+
+    // auth/link (POST /auth/link/otp, /auth/link/verify) — add email/phone to an account that
+    // registered with only the other one
+    LINK_TARGET_ALREADY_SET(8001, "This account already has that identifier set", HttpStatus.CONFLICT),
+    LINK_CODE_INVALID(8002, "Invalid or expired verification code", HttpStatus.BAD_REQUEST);
 
     int code;
     String message;

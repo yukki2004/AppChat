@@ -97,6 +97,24 @@
 </details>
 
 <details open class="step">
+  <summary>2c. Liên kết thêm Email/SĐT (phải đăng nhập trước) — thêm cái còn thiếu vào account đăng ký bằng cái kia</summary>
+  <p>Điền đúng 1 trong 2 (email HOẶC phone) — điền cả 2 hoặc cả 2 rỗng cũng bị chặn 400 giống bước
+  đăng ký. Nếu account đã có sẵn cột đó rồi (VD account đăng ký bằng email, giờ lại thử link thêm
+  email khác) sẽ bị chặn <code>LINK_TARGET_ALREADY_SET</code>.</p>
+  <input id="link-password" placeholder="mật khẩu hiện tại (re-auth)" type="password" />
+  <input id="link-email" placeholder="email muốn thêm (để trống nếu thêm sđt)" />
+  <input id="link-phone" placeholder="sđt muốn thêm +84... (để trống nếu thêm email)" />
+  <button onclick="linkIdentifierStart()">2c-1. Gửi OTP liên kết</button>
+  <div class="row">
+    <input id="link-verify-target" placeholder="email/sđt vừa điền ở trên" />
+    <input id="link-verify-code" placeholder="mã OTP" />
+  </div>
+  <button onclick="linkIdentifierVerify()">2c-2. Xác thực OTP → liên kết</button>
+  <p>Liên kết xong, thử đăng nhập lại ở bước 2 bằng định danh vừa thêm — sẽ vào được luôn, không
+  cần sửa gì thêm ở phía đăng nhập.</p>
+</details>
+
+<details open class="step">
   <summary>3. Bật xác thực 2 lớp (phải đăng nhập trước — đã có cookie access_token)</summary>
   <button onclick="totpSetup()">TOTP: tạo mã</button>
   <div id="totp-qr"></div>
@@ -270,6 +288,21 @@ function registerVerify() {
   return call('POST', '/auth/register/verify', {
     target: val('reg-verify-target'),
     code: val('reg-verify-code'),
+  });
+}
+
+function linkIdentifierStart() {
+  return call('POST', '/auth/link/otp', {
+    password: val('link-password'),
+    email: val('link-email') || null,
+    phone: val('link-phone') || null,
+  });
+}
+
+function linkIdentifierVerify() {
+  return call('POST', '/auth/link/verify', {
+    target: val('link-verify-target'),
+    code: val('link-verify-code'),
   });
 }
 

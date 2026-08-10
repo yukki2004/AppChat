@@ -981,6 +981,42 @@ Bảng: group_event_rsvp [PostgreSQL]
 
 Sự kiện RabbitMQ mới: group.event_created, group.event_reminder (publish trước reminder_minutes_before) → Notification Service consume và push. Ghi chú: chưa hỗ trợ event lặp lại — nếu làm sau, phải lưu recurrence rule + timezone gốc, không chốt cứng danh sách UTC vì DST sẽ làm lệch giờ qua các lần lặp.
 
+## **3.14a Ghi chú triển khai entity domain group (bổ sung 2026-08-10)**
+
+Khi code entity JPA cho domain `group/` (branch `feature/group-management`), có vài điểm lệch/thêm
+so với mục 3.7–3.14 phía trên — ghi lại đây để code không lệch khỏi doc, thay vì để rải rác trong
+Javadoc từng entity:
+
+- **`GroupMemberRole`, `GroupJoinRequestStatus`, `GroupEventRsvpStatus` lưu DB dạng chuỗi
+  (`@Enumerated(EnumType.STRING)`)**, không theo pattern số cố định + converter ở
+  `skills/naming-conventions.md` #3 — quyết định giống `user_blocks.scope` (`BlockScope`): chỉ
+  vài giá trị cố định, không đáng thêm converter.
+- **`group_join_requests` có thêm cột `invited_by` (nullable)**, không có trong bảng ở mục 3.9 —
+  dùng để phân biệt 2 tình huống cùng rơi vào bảng này: `NULL` = chính `user_id` tự xin vào (qua
+  QR/link lúc `require_approval=true`); có giá trị = 1 Member thường (không phải Admin/Owner) chủ
+  động đề xuất add `user_id` vào lúc đang bật duyệt, nhưng không add thẳng được.
+- **`group_events` có thêm cột `reminded_at`**, không có trong bảng ở mục 3.14 — bắt buộc theo
+  root CLAUDE.md "Lưu ý khi code" #3 (chống scheduler publish `group.event_reminder` trùng lặp).
+- **Bảng mới `group_admin_permissions`** (không có trong spec gốc) — cho phép Owner giới hạn
+  quyền cụ thể của từng Admin (`can_approve_members`, `can_kick_members`, `can_edit_group_info`,
+  `can_manage_events`), thay vì Admin mặc định full quyền như Owner. PK composite
+  `(group_id, user_id)`, chỉ tồn tại khi role=ADMIN — Owner không có row, luôn full quyền. Tạo với
+  toàn bộ cờ `true` ngay lúc promote lên Admin (giữ hành vi cũ làm baseline), xoá hẳn khi
+  demote/transfer/kick. 4 quyền này CHỦ Ý không gồm: chuyển nhượng Owner, xoá nhóm, kick
+  Owner/Admin khác — luôn chỉ Owner làm được, không có cấu hình nào mở khoá cho Admin.
+- **Bỏ hẳn `group_invite_pending`** khỏi scope hiện tại (bảng này lẽ ra dùng khi
+  `who_can_add_to_group=NOBODY` chặn add thẳng) — vì domain `privacy/` (nơi lưu
+  `who_can_add_to_group`) chưa có 1 dòng code nào trong `core-service`. Quyết định: tạm coi như
+  không ai bị chặn privacy khi add vào nhóm, tới khi domain `privacy/` được xây thì làm lại phần
+  này.
+- **`groups.conversation_ref` tạm nullable** ở entity, khác NOT NULL trong bảng ở mục 3.9 — vì
+  chưa có gRPC client gọi `MessagingService.CreateConversation` trong codebase, cột này sẽ được
+  set bằng 1 UPDATE ngay sau khi gRPC đó được nối, không set được lúc insert.
+- **`GroupMemberEntity` vẫn dùng `id` UUID riêng** (không composite `(group_id, user_id)` như
+  `group_member_nicknames`/`group_event_rsvp`/`group_admin_permissions`) — quyết định giữ nguyên
+  dù về bản chất cặp này có thể làm PK (không có tình huống đổi vai như `requester_id`/
+  `addressee_id` ở `friendships`); có thể đổi sang composite key sau nếu cần.
+
 ## **3.15 Last seen bền vững**
 
 Thêm field last_seen_at TIMESTAMPTZ vào bảng users (mục 3.4). Cơ chế cập nhật: Realtime Gateway publish presence.offline khi user disconnect → Core Service consume event này → update users.last_seen_at = now(). Không ghi DB đồng bộ mỗi lần connect/disconnect, đi qua event để tự throttle.

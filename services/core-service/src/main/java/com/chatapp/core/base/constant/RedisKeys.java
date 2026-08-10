@@ -10,6 +10,7 @@ public final class RedisKeys {
     public static final long PENDING_TOTP_SECRET_TTL_SECONDS = 600;
     public static final long RESET_PASSWORD_TOKEN_TTL_SECONDS = 600;
     public static final long QR_LOGIN_TTL_SECONDS = 90;
+    public static final long FRIEND_QR_TOKEN_TTL_SECONDS = 300;
 
     public static String preAuth(String preAuthToken) {
         return "cache:pre_auth:" + preAuthToken;
@@ -79,6 +80,22 @@ public final class RedisKeys {
 
     public static String loginLockout(UUID userId) {
         return "cache:login_lockout:" + userId;
+    }
+
+    /** Add-friend-by-QR token → owner's userId. Not single-use, same token stays resolvable
+     *  by every scan until TTL. */
+    public static String friendQrToken(String token) {
+        return "cache:friend_qr_token:" + token;
+    }
+
+    /** Reverse index userId → current active token, needed to revoke/replace by userId alone. */
+    public static String friendQrActive(UUID userId) {
+        return "cache:friend_qr_active:" + userId;
+    }
+
+    /** Use-counter for a {@link #friendQrToken}, capped at {@code FriendQrTokenService.MAX_USES}. */
+    public static String friendQrTokenUses(String token) {
+        return "cache:friend_qr_token_uses:" + token;
     }
 
     private RedisKeys() {

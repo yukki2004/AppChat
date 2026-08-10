@@ -33,6 +33,10 @@ public enum ErrorCode {
     // friend/#26 (POST/DELETE /friends/close/{userId})
     SELF_CLOSE_FRIEND_NOT_ALLOWED(2013, "You cannot add yourself as a close friend", HttpStatus.BAD_REQUEST),
 
+    // friend/QR (GET /friends/qr-token, POST /friends/requests/qr, DELETE /friends/qr-token)
+    FRIEND_QR_TOKEN_INVALID(2014, "This QR code is invalid or has expired", HttpStatus.NOT_FOUND),
+    FRIEND_QR_TOKEN_USAGE_LIMIT_REACHED(2015, "This QR code has reached its usage limit", HttpStatus.TOO_MANY_REQUESTS),
+
     // auth/password #11-12 (PUT /auth/password, POST /auth/password/forgot/verify, /auth/password/reset)
     INVALID_OLD_PASSWORD(3001, "Current password is incorrect", HttpStatus.BAD_REQUEST),
     PASSWORD_RESET_CODE_INVALID(3002, "Invalid or expired code", HttpStatus.BAD_REQUEST),

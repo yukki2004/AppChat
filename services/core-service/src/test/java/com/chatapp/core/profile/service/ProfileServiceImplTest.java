@@ -15,7 +15,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.chatapp.core.base.UserResponse;
 import com.chatapp.core.base.entity.UserEntity;
-import com.chatapp.core.base.repository.UserBlockRepository;
 import com.chatapp.core.base.repository.UserRepository;
 import com.chatapp.core.exception.common.AppException;
 import com.chatapp.core.exception.common.ErrorCode;
@@ -25,8 +24,6 @@ class ProfileServiceImplTest {
 
     @Mock
     private UserRepository userRepository;
-    @Mock
-    private UserBlockRepository userBlockRepository;
 
     private ProfileServiceImpl profileService;
 
@@ -35,7 +32,7 @@ class ProfileServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        profileService = new ProfileServiceImpl(userRepository, userBlockRepository);
+        profileService = new ProfileServiceImpl(userRepository);
     }
 
     private UserEntity someUser() {
@@ -43,10 +40,8 @@ class ProfileServiceImplTest {
     }
 
     @Test
-    void getPublicProfile_returnsUser_whenNotBlocked() {
+    void getPublicProfile_returnsUser() {
         when(userRepository.findByIdAndDeletedAtIsNull(targetUserId)).thenReturn(Optional.of(someUser()));
-        when(userBlockRepository.existsByBlockerIdAndBlockedId(viewerId, targetUserId)).thenReturn(false);
-        when(userBlockRepository.existsByBlockerIdAndBlockedId(targetUserId, viewerId)).thenReturn(false);
 
         UserResponse result = profileService.getPublicProfile(viewerId, targetUserId);
 
@@ -56,29 +51,6 @@ class ProfileServiceImplTest {
     @Test
     void getPublicProfile_throwsNotFound_whenTargetMissing() {
         when(userRepository.findByIdAndDeletedAtIsNull(targetUserId)).thenReturn(Optional.empty());
-
-        assertThatThrownBy(() -> profileService.getPublicProfile(viewerId, targetUserId))
-                .isInstanceOf(AppException.class)
-                .extracting(ex -> ((AppException) ex).getErrorCode())
-                .isEqualTo(ErrorCode.USER_NOT_FOUND);
-    }
-
-    @Test
-    void getPublicProfile_throwsSameNotFound_whenViewerBlockedTarget() {
-        when(userRepository.findByIdAndDeletedAtIsNull(targetUserId)).thenReturn(Optional.of(someUser()));
-        when(userBlockRepository.existsByBlockerIdAndBlockedId(viewerId, targetUserId)).thenReturn(true);
-
-        assertThatThrownBy(() -> profileService.getPublicProfile(viewerId, targetUserId))
-                .isInstanceOf(AppException.class)
-                .extracting(ex -> ((AppException) ex).getErrorCode())
-                .isEqualTo(ErrorCode.USER_NOT_FOUND);
-    }
-
-    @Test
-    void getPublicProfile_throwsSameNotFound_whenTargetBlockedViewer() {
-        when(userRepository.findByIdAndDeletedAtIsNull(targetUserId)).thenReturn(Optional.of(someUser()));
-        when(userBlockRepository.existsByBlockerIdAndBlockedId(viewerId, targetUserId)).thenReturn(false);
-        when(userBlockRepository.existsByBlockerIdAndBlockedId(targetUserId, viewerId)).thenReturn(true);
 
         assertThatThrownBy(() -> profileService.getPublicProfile(viewerId, targetUserId))
                 .isInstanceOf(AppException.class)

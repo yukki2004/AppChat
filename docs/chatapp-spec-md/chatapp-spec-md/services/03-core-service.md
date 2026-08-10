@@ -33,16 +33,16 @@
 | **15** | **Cập nhật Profile** | Đổi display_name, bio, avatar_url, cover_url, date_of_birth. |
 | **16** | **Cài đặt Privacy** | Ai thấy trạng thái online, ai kết bạn được, ai nhắn tin, ai xem story, ai xem profile. |
 | **17** | **Ẩn trạng thái theo khung giờ** | Lưu schedule_hidden_from/to (UTC time). Presence Service đọc qua gRPC để kiểm tra. |
-| **18** | **Tìm kiếm user** | Full-text search display_name + exact match username. Trả PublicUserDTO, ẩn blocked users. |
+| **18** | **Tìm kiếm user** | Full-text search display_name + exact match username. Trả PublicUserDTO. |
 | **19** | **Gửi lời mời kết bạn** | Tạo friendship (status=PENDING). Publish event friend.request_sent. |
 | **20** | **Chấp nhận kết bạn** | Update friendship status=ACCEPTED. Publish event friend.accepted. |
 | **21** | **Từ chối / Huỷ lời mời** | Update status=REJECTED / CANCELLED. |
 | **22** | **Xoá bạn bè** | Delete friendship record. Publish event friend.removed. |
 | **23** | **Danh sách bạn bè** | Trả danh sách kèm PublicPresenceDTO (gRPC Presence). |
-| **24** | **Chặn người dùng** | Insert user_blocks. Publish event user.blocked. Ẩn khỏi search, danh sách online. |
+| **24** | **Chặn người dùng** | Insert user_blocks (scope=ALL). Publish event user.blocked. |
 | **25** | **Gỡ chặn** | Delete user_blocks. Publish event user.unblocked. |
 | **26** | **Danh sách bạn thân (Close Friends)** | Quản lý close_friends list – dùng cho story visibility. |
-| **27** | **Xem profile người khác** | Trả thông tin theo privacy_settings. Blocked → 404. |
+| **27** | **Xem profile người khác** | Trả thông tin theo privacy_settings. |
 | **28** | **Backup codes 2FA** | Generate 8 backup codes, lưu hash, trả về lúc bật method 2FA đầu tiên. Regenerate được (re-auth password). Dùng thay TOTP/SMS/EMAIL khi mất quyền truy cập method chính. |
 | **29** | **Audit Log truy cập** | Ghi mọi login, logout, đổi password vào login_audit_logs. |
 | **30** | **Report người dùng** | Tạo `reports` (reported_type=USER), rate-limit số report gửi/ngày để chống lạm dụng, publish `user.reported` CHỈ cho kênh admin (không báo cho người bị report — tránh trả thù). Xem mục 3.16. |
@@ -517,6 +517,33 @@ lọc `OR` trực tiếp trên 2 cột đó, không dùng được unique index 
 `GET /friends/requests/incoming`, `GET /friends/requests/outgoing` — liệt kê lời mời đang
 PENDING theo 2 chiều nhận/gửi.
 
+**Gửi lời mời kết bạn qua QR** (mở rộng #19, không phải flow riêng): `GET /friends/qr-token`
+cấp 1 token ngẫu nhiên (UUID v4) đại diện cho user gọi, lưu Redis
+`cache:friend_qr_token:{token} → user_id`, TTL 5 phút (`RedisKeys.FRIEND_QR_TOKEN_TTL_SECONDS`),
+KHÔNG single-use — cùng 1 token vẫn resolve được cho tới khi hết TTL, vì QR đứng yên trên màn
+hình cho nhiều người quét lần lượt, khác OTP dùng 1 lần. FE tự quyết định encode gì vào ảnh QR
+(token trần, hay 1 URL chứa token) — Core Service không quan tâm định dạng QR, chỉ cấp/resolve
+token. `POST /friends/requests/qr` nhận `{qrToken, message}`, resolve token ra `addressee_id`
+rồi chạy lại NGUYÊN luồng #19 (`sendRequest`) — không có guard/check riêng cho nhánh QR, token
+chỉ là cách khác để cung cấp `addresseeId`. Token invalid/hết hạn → `FRIEND_QR_TOKEN_INVALID`
+(404), không phân biệt "chưa từng tồn tại" hay "đã hết hạn" trong message trả về.
+
+Mỗi user chỉ có đúng 1 token "active" tại 1 thời điểm, track bằng con trỏ Redis riêng
+`cache:friend_qr_active:{user_id} → token`:
+- **Revoke sớm**: `DELETE /friends/qr-token` — xoá token active ngay, không cần đợi hết TTL
+  5 phút (idempotent, gọi khi không có token active nào cũng trả 200 bình thường).
+- **Tạo token mới tự huỷ token cũ**: gọi lại `GET /friends/qr-token` khi đã có token active thì
+  token cũ bị xoá ngay (qua con trỏ trên) trước khi token mới được tạo — ảnh QR cũ (chụp màn
+  hình, tab cũ còn mở) chết ngay, không phải đợi TTL.
+- **Giới hạn số lần dùng** (defense-in-depth, KHÔNG phải single-use): mỗi token tối đa
+  `FriendQrTokenService.MAX_USES` = 30 lần gửi request (đếm bằng Redis `INCR` atomic trên
+  `cache:friend_qr_token_uses:{token}`, cùng TTL với token — bắt buộc atomic, không tách
+  đọc/ghi, tránh race 2 lượt quét cùng lúc đều đọc thấy count cũ và cùng vượt hạn mức). Vượt
+  hạn mức → `FRIEND_QR_TOKEN_USAGE_LIMIT_REACHED` (429), token vẫn còn hạn TTL nhưng không
+  resolve tiếp được nữa. Mục đích: chặn trường hợp QR bị lộ ra ngoài ý định ban đầu (đăng công
+  khai, forward hàng loạt) bị spam request, KHÔNG nhằm hạn chế cách dùng bình thường (show QR
+  cho vài người quét trong 1 buổi gặp mặt không bao giờ chạm ngưỡng này).
+
 **#23 Danh sách bạn bè** (`GET /friends`): trả `List<UserResponse>` thuần, KHÔNG có
 `PublicPresenceDTO` như mô tả gốc — chưa có client gRPC Presence nào trong codebase (Presence
 thuộc Realtime Gateway, không phải Core Service), ghi TODO trong code, nối khi Presence sẵn sàng.
@@ -527,38 +554,33 @@ thì 2 người phải đang ACCEPTED trong `friendships` trước (lỗi `FRIEN
 add/remove đều idempotent. Route: `POST /friends/close/{userId}`, `DELETE /friends/close/{userId}`,
 `GET /friends/close`.
 
-**Block là tường chắn toàn diện** (#24): chặn ai → xoá luôn row `friendships` giữa 2 người (bất
-kể status nào) + xoá cả 2 chiều trong `close_friends`. Check block ở #19 (gửi lời mời) là OR
-2 chiều (A chặn B **hoặc** B chặn A đều chặn được), trả lỗi chung `FRIEND_REQUEST_NOT_ALLOWED`,
-không lộ ai là người chặn. Unfriend (#22) cũng cascade xoá `close_friends` 2 chiều, cùng logic.
-Cả block và unblock đều idempotent — gọi lại khi đã ở đúng trạng thái không báo lỗi, trả 200.
-Bảng `close_friends` được tạo migration ngay từ batch này (#24/#25) dù các endpoint quản lý close
-friends (#26) chưa code — vì block/unfriend cần cascade xoá vào bảng đó trước khi #26 tồn tại.
+**Block chỉ mute tin nhắn/cuộc gọi, KHÔNG đụng gì tới bạn bè** (#24) — **quyết định lại
+2026-08-09**, thay cho thiết kế "full wall" ban đầu (xoá friendship/close-friend, chặn friend
+request, ẩn profile — đã lên code rồi revert). Từ giờ:
+- Block **không** cascade xoá `friendships`/`close_friends` — 2 người vẫn là bạn/close friend
+  bình thường sau khi 1 bên block.
+- Gửi lời mời kết bạn (#19), xem profile (#27), tìm kiếm (#18) đều **không** check `user_blocks`
+  nữa — hoàn toàn không bị ảnh hưởng bởi block.
+- Cả block và unblock vẫn idempotent — gọi lại khi đã ở đúng trạng thái không báo lỗi, trả 200.
+- Bảng `user_blocks` có cột `scope` (VARCHAR, lưu thẳng chữ `MESSAGE`/`CALL`/`ALL` — không đánh
+  số, khác với `FriendshipStatus`/`OtpPurpose` vì giá trị/nhu cầu tra cứu quá đơn giản không đáng
+  thêm converter, giống ngoại lệ đã có sẵn ở `two_factor_methods.method`) nói rõ block đang mute
+  CÁI GÌ: `MESSAGE` (chỉ tin nhắn), `CALL` (chỉ cuộc gọi), `ALL` (cả 2). v1 bấm nút "Chặn" luôn
+  tạo `ALL`; chọn riêng `MESSAGE` hay `CALL` là tính năng UI làm sau, chưa có ở v1.
 
-**TODO — 2 loại block chưa được lên kế hoạch cụ thể (đã trao đổi, chưa chốt lịch code):** hiện
-tại `user_blocks` chỉ có đúng 1 loại "full block" (như mô tả trên: xoá friendship/close-friend,
-chặn friend request, và về sau — khi messaging/call/social-service enforce — sẽ ẩn cả nhắn tin/
-gọi/profile/tìm kiếm). Có bàn tới 1 loại thứ 2 hẹp hơn — "chặn tin nhắn/gọi" — vẫn giữ bạn bè,
-vẫn thấy profile nhau, chỉ mute nhắn tin + gọi, độc lập với full block. Nếu triển khai:
-- Thêm cột `scope SMALLINT NOT NULL DEFAULT 1` vào `user_blocks` (`FULL=1`,
-  `MESSAGE_CALL_ONLY=2`, theo `skills/naming-conventions.md` #3), không tạo bảng riêng.
-- Cascade xoá `friendships`/`close_friends` chỉ áp dụng cho scope `FULL`.
-- Check block ở #19 (chặn gửi friend request) chỉ tính scope `FULL`.
-- Core Service vẫn là nguồn sự thật duy nhất cho CẢ 2 scope (không tách data qua messaging-
-  service/call-service dù họ là bên enforce — giống lý do `CheckFriendship` đặt ở Core Service
-  từ đầu: đây là 1 quan hệ user-user, Core Service sở hữu MỌI quan hệ user-user).
-- Cần thêm gRPC `CheckBlock(actorId, targetId, action)` ở Core Service, trả `blocked: boolean`
-  theo action (`SEND_MESSAGE`/`CALL` → chặn nếu có row `FULL` HOẶC `MESSAGE_CALL_ONLY`;
-  `SEND_FRIEND_REQUEST`/`VIEW_PROFILE` → chỉ chặn nếu row là `FULL`). Messaging Service/Call
-  Service phải tự gọi gRPC này trước khi cho gửi tin/bắt đầu gọi — Core Service không chủ động
-  can thiệp vào luồng của service khác.
+**TODO — enforcement chưa code (messaging-service/call-service):** Core Service hiện chỉ là nơi
+lưu trữ + nguồn sự thật cho quan hệ block, CHƯA có gì thật sự chặn tin nhắn/cuộc gọi. Cần:
+- gRPC `CheckBlock(actorId, targetId)` ở Core Service, trả `blocked: boolean` — Messaging
+  Service/Call Service tự gọi trước khi cho gửi tin/bắt đầu gọi. Core Service không chủ động
+  can thiệp vào luồng của service khác (đúng nguyên tắc database-per-service).
+- Khi triển khai xong, việc còn cần chốt là hướng nào chặn: chặn 1 chiều (A block B → B vẫn nhắn
+  được cho A nhưng A không thấy) hay 2 chiều (cả 2 không nhắn được nhau) — CHƯA quyết, ghi TODO
+  ở đây để không quên khi tới lượt code call-service/messaging-service.
 
 **#27 Xem profile người khác** (`GET /users/{userId}`, domain mới `profile/`): trả
-`USER_NOT_FOUND` (404) cả 2 trường hợp — user không tồn tại VÀ 1 trong 2 người chặn nhau (OR
-2 chiều) — dùng CHUNG 1 error code để người bị chặn không phân biệt được "bị chặn" với "không
-tồn tại". Check `privacy_settings.who_can_see_profile` (#16) BỎ QUA — domain Privacy chưa code,
-mọi profile hiện public hoàn toàn với viewer không bị chặn, ghi TODO trong code, nối khi #16
-xong (cùng lý do đã bỏ qua `who_can_add_friend` ở #19).
+`USER_NOT_FOUND` (404) nếu user không tồn tại. Check `privacy_settings.who_can_see_profile`
+(#16) BỎ QUA — domain Privacy chưa code, mọi profile hiện public hoàn toàn, ghi TODO trong code,
+nối khi #16 xong (cùng lý do đã bỏ qua `who_can_add_friend` ở #19).
 
 ### **ð user_blocks  [PostgreSQL]**
 
@@ -568,6 +590,7 @@ xong (cùng lý do đã bỏ qua `who_can_add_friend` ở #19).
 | **id** | UUID | NO | gen_random_uuid() | PK |
 | **blocker_id** | UUID FK→users | NO | – | Người chặn |
 | **blocked_id** | UUID FK→users | NO | – | Người bị chặn |
+| scope | VARCHAR(10) | NO | 'ALL' | `MESSAGE`/`CALL`/`ALL` (duy nhất v1 tạo ra — chặn cả 2) |
 | reason | VARCHAR(100) | YES | NULL | Lý do (tuỳ chọn) |
 | created_at | TIMESTAMPTZ | NO | now() | UTC |
 

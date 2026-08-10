@@ -16,7 +16,9 @@ import org.springframework.web.bind.annotation.RestController;
 import com.chatapp.core.base.ApiResponse;
 import com.chatapp.core.base.UserResponse;
 import com.chatapp.core.friend.FriendService;
+import com.chatapp.core.friend.dto.request.SendFriendRequestByQrRequest;
 import com.chatapp.core.friend.dto.request.SendFriendRequestRequest;
+import com.chatapp.core.friend.dto.response.FriendQrTokenResponse;
 import com.chatapp.core.friend.dto.response.FriendRequestResponse;
 import com.chatapp.core.friend.dto.response.SendFriendRequestResponse;
 
@@ -35,6 +37,25 @@ public class FriendController {
             @RequestHeader("X-User-Id") UUID userId, @Valid @RequestBody SendFriendRequestRequest request) {
         SendFriendRequestResponse result = friendService.sendRequest(userId, request.getAddresseeId(), request.getMessage());
         return ResponseEntity.ok(ApiResponse.ok(result));
+    }
+
+    @GetMapping("/qr-token")
+    public ResponseEntity<ApiResponse<FriendQrTokenResponse>> createQrToken(@RequestHeader("X-User-Id") UUID userId) {
+        return ResponseEntity.ok(ApiResponse.ok(friendService.createQrToken(userId)));
+    }
+
+    @PostMapping("/requests/qr")
+    public ResponseEntity<ApiResponse<SendFriendRequestResponse>> sendRequestByQr(
+            @RequestHeader("X-User-Id") UUID userId, @Valid @RequestBody SendFriendRequestByQrRequest request) {
+        SendFriendRequestResponse result =
+                friendService.sendRequestByQrToken(userId, request.getQrToken(), request.getMessage());
+        return ResponseEntity.ok(ApiResponse.ok(result));
+    }
+
+    @DeleteMapping("/qr-token")
+    public ResponseEntity<ApiResponse<Void>> revokeQrToken(@RequestHeader("X-User-Id") UUID userId) {
+        friendService.revokeQrToken(userId);
+        return ResponseEntity.ok(ApiResponse.ok());
     }
 
     @GetMapping("/requests/incoming")

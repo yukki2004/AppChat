@@ -34,8 +34,9 @@
 ## 3. Enum lưu DB — số cố định gán tay, tầng ứng dụng/API luôn dùng chữ
 
 > Áp dụng khi: thêm 1 enum MỚI cần lưu vào cột DB (SQL) từ giờ trở đi. KHÔNG áp dụng hồi tố cho
-> các cột VARCHAR enum đã có sẵn trong doc/migration hiện tại (VD `two_factor_methods.method`) —
-> đó là quyết định có chủ đích, chỉ áp dụng quy tắc này cho enum mới.
+> các cột VARCHAR enum đã có sẵn trong doc/migration hiện tại (VD `two_factor_methods.method`,
+> `user_blocks.scope` — quyết định 2026-08-09 giữ VARCHAR vì chỉ 3 giá trị cố định, không đáng
+> thêm converter) — đó là quyết định có chủ đích, chỉ áp dụng quy tắc này cho enum mới.
 
 - **Trong DB (SQL)**: lưu số nguyên (`SMALLINT`/`INT`), KHÔNG lưu chuỗi VARCHAR tên enum.
 - **Trong code ứng dụng, request/response JSON, log**: luôn dùng TÊN chữ của enum

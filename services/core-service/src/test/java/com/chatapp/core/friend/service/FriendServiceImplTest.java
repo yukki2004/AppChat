@@ -25,13 +25,12 @@ import com.chatapp.core.base.entity.FriendshipEntity;
 import com.chatapp.core.base.entity.UserEntity;
 import com.chatapp.core.base.repository.CloseFriendRepository;
 import com.chatapp.core.base.repository.FriendshipRepository;
-import com.chatapp.core.base.repository.UserBlockRepository;
 import com.chatapp.core.base.repository.UserRepository;
 import com.chatapp.core.exception.common.AppException;
 import com.chatapp.core.exception.common.ErrorCode;
+import com.chatapp.core.friend.dto.response.FriendQrTokenResponse;
 import com.chatapp.core.friend.dto.response.SendFriendRequestResponse;
 import com.chatapp.core.friend.util.FriendRequestResolver;
-import com.chatapp.core.lock.PairLockService;
 
 @ExtendWith(MockitoExtension.class)
 class FriendServiceImplTest {
@@ -41,11 +40,9 @@ class FriendServiceImplTest {
     @Mock
     private FriendshipRepository friendshipRepository;
     @Mock
-    private UserBlockRepository userBlockRepository;
-    @Mock
     private CloseFriendRepository closeFriendRepository;
     @Mock
-    private PairLockService pairLockService;
+    private FriendQrTokenService friendQrTokenService;
 
     private FriendServiceImpl friendService;
 
@@ -54,15 +51,12 @@ class FriendServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        // userBlockRepository is left unstubbed in most tests below — Mockito defaults an
-        // unstubbed boolean-returning method to false, which is exactly "not blocked".
         friendService = new FriendServiceImpl(
                 userRepository,
                 friendshipRepository,
-                userBlockRepository,
                 closeFriendRepository,
                 new FriendRequestResolver(friendshipRepository),
-                pairLockService);
+                friendQrTokenService);
     }
 
     private UserEntity someUser() {
@@ -100,20 +94,6 @@ class FriendServiceImplTest {
         assertThrowsErrorCode(() -> friendService.sendRequest(requesterId, addresseeId, null),
                 ErrorCode.REQUESTER_NOT_FOUND);
         verify(userRepository, never()).findByIdAndDeletedAtIsNull(addresseeId);
-    }
-
-    @Test
-    void sendRequest_rejectsWhenEitherDirectionBlocked() {
-        // OR-2-chiều collapsed into 1 round-trip query now — the caller can't tell (and doesn't
-        // need to) which side actually blocked which.
-        when(userRepository.findByIdAndDeletedAtIsNull(requesterId)).thenReturn(Optional.of(someUser()));
-        when(userRepository.findByIdAndDeletedAtIsNull(addresseeId)).thenReturn(Optional.of(someUser()));
-        when(userBlockRepository.existsByBlockerIdAndBlockedIdOrBlockerIdAndBlockedId(
-                requesterId, addresseeId, addresseeId, requesterId)).thenReturn(true);
-
-        assertThrowsErrorCode(() -> friendService.sendRequest(requesterId, addresseeId, null),
-                ErrorCode.FRIEND_REQUEST_NOT_ALLOWED);
-        verify(friendshipRepository, never()).findByUnorderedPair(any(), any());
     }
 
     @Test
@@ -200,6 +180,61 @@ class FriendServiceImplTest {
 
         assertThat(result.getStatus()).isEqualTo("ACCEPTED");
         assertThat(winner.getStatus()).isEqualTo(FriendshipStatus.ACCEPTED);
+    }
+
+    @Test
+    void createQrToken_delegatesToFriendQrTokenService() {
+        var serviceResult = new FriendQrTokenService.Result("tok-1", java.time.Instant.now().plusSeconds(300));
+        when(friendQrTokenService.create(requesterId)).thenReturn(serviceResult);
+
+        FriendQrTokenResponse response = friendService.createQrToken(requesterId);
+
+        assertThat(response.token()).isEqualTo("tok-1");
+        assertThat(response.expiresAt()).isEqualTo(serviceResult.expiresAt());
+    }
+
+    @Test
+    void sendRequestByQrToken_throwsInvalid_whenTokenNotResolvable() {
+        when(friendQrTokenService.resolve("bad-token")).thenReturn(Optional.empty());
+
+        assertThrowsErrorCode(() -> friendService.sendRequestByQrToken(requesterId, "bad-token", "hi"),
+                ErrorCode.FRIEND_QR_TOKEN_INVALID);
+        verify(friendQrTokenService, never()).recordUse(any());
+        verify(friendshipRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void sendRequestByQrToken_recordsUse_thenRunsSameFlowAsSendRequest() {
+        // Resolves to addresseeId, then must go through the exact same guard checks as a plain
+        // sendRequest — reusing sendRequest_insertsFreshPendingRow_whenNoExistingRow's setup.
+        when(friendQrTokenService.resolve("good-token")).thenReturn(Optional.of(addresseeId));
+        when(userRepository.findByIdAndDeletedAtIsNull(requesterId)).thenReturn(Optional.of(someUser()));
+        when(userRepository.findByIdAndDeletedAtIsNull(addresseeId)).thenReturn(Optional.of(someUser()));
+        when(friendshipRepository.findByUnorderedPair(requesterId, addresseeId)).thenReturn(Optional.empty());
+
+        SendFriendRequestResponse result = friendService.sendRequestByQrToken(requesterId, "good-token", "hi via qr");
+
+        assertThat(result.getStatus()).isEqualTo("PENDING");
+        verify(friendQrTokenService).recordUse("good-token");
+        verify(friendshipRepository).saveAndFlush(any(FriendshipEntity.class));
+    }
+
+    @Test
+    void sendRequestByQrToken_propagatesUsageLimitError_beforeRunningSendRequestChecks() {
+        when(friendQrTokenService.resolve("exhausted-token")).thenReturn(Optional.of(addresseeId));
+        org.mockito.Mockito.doThrow(new AppException(ErrorCode.FRIEND_QR_TOKEN_USAGE_LIMIT_REACHED))
+                .when(friendQrTokenService).recordUse("exhausted-token");
+
+        assertThrowsErrorCode(() -> friendService.sendRequestByQrToken(requesterId, "exhausted-token", "hi"),
+                ErrorCode.FRIEND_QR_TOKEN_USAGE_LIMIT_REACHED);
+        verify(userRepository, never()).findByIdAndDeletedAtIsNull(any());
+    }
+
+    @Test
+    void revokeQrToken_delegatesToFriendQrTokenService() {
+        friendService.revokeQrToken(requesterId);
+
+        verify(friendQrTokenService).revoke(requesterId);
     }
 
     @Test

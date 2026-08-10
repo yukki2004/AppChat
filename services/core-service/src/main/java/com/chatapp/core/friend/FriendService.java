@@ -4,12 +4,21 @@ import java.util.List;
 import java.util.UUID;
 
 import com.chatapp.core.base.UserResponse;
+import com.chatapp.core.friend.dto.response.FriendQrTokenResponse;
 import com.chatapp.core.friend.dto.response.FriendRequestResponse;
 import com.chatapp.core.friend.dto.response.SendFriendRequestResponse;
 
 public interface FriendService {
 
     SendFriendRequestResponse sendRequest(UUID requesterId, UUID addresseeId, String message);
+
+    FriendQrTokenResponse createQrToken(UUID userId);
+
+    /** Resolves {@code qrToken} to the QR owner's id, then delegates to {@link #sendRequest}. */
+    SendFriendRequestResponse sendRequestByQrToken(UUID requesterId, String qrToken, String message);
+
+    /** Idempotent — a no-op if nothing is active. */
+    void revokeQrToken(UUID userId);
 
     List<FriendRequestResponse> listIncomingPending(UUID userId);
 

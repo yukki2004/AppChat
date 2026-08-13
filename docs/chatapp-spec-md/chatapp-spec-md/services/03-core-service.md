@@ -749,8 +749,8 @@ identity-service/
 | **1** | **Tạo nhóm** | Insert `groups` (chưa có `conversation_ref`) → gọi gRPC `MessagingService.CreateConversation(type=GROUP, participant_ids=[creator])` (đồng bộ, cần kết quả ngay vì `conversation_ref` NOT NULL) → nhận về `conversation_id` → update `groups.conversation_ref` → publish `group.member_joined` cho chính creator (role=OWNER). |
 | **2** | **Đổi tên, ảnh nhóm** | Admin/Owner update group name, avatar_url. |
 | **3** | **Tạo QR Code tham gia** | Generate qr_code_token unique. Client render thành QR image. |
-| **4** | **Tạo Invite Link** | Generate invite_link token, có thể đặt thời hạn hết hạn. |
-| **5** | **Làm mới / Xoá invite link** | Reset invite_link_token. Link cũ vô hiệu. |
+| **4** | **Tạo Invite Link** | Generate invite_link_token unique. Không có thời hạn hết hạn tự động (quyết định 2026-08-14 — bỏ hẳn khỏi scope, xem "Lưu ý khi code" bên dưới); lộ thì rotate lại là đủ. |
+| **5** | **Làm mới / Xoá QR / Invite link** | Reset (rotate) hoặc revoke (xoá hẳn, không sinh token mới) — đối xứng cho cả QR và invite link, mỗi cái có endpoint revoke riêng. Token cũ vô hiệu ngay khi rotate hoặc revoke. |
 | **6** | **Tham gia qua Link/QR** | Nếu require_approval=false → add ngay. Nếu true → tạo join request. |
 | **7** | **Bật/Tắt chế độ duyệt** | Admin/Owner toggle require_approval. |
 | **8** | **Duyệt thành viên** | Admin xem danh sách group_join_requests, approve/reject từng người hoặc bulk. |
@@ -801,8 +801,7 @@ identity-service/
 | name | VARCHAR(100) | NO | – | Tên nhóm |
 | avatar_url | VARCHAR(500) | YES | NULL | CDN URL |
 | description | TEXT | YES | NULL | Mô tả nhóm |
-| invite_link_token | VARCHAR(100) UNIQUE | YES | NULL | Token invite link |
-| invite_link_expires_at | TIMESTAMPTZ | YES | NULL | Hết hạn link (UTC) |
+| invite_link_token | VARCHAR(100) UNIQUE | YES | NULL | Token invite link — không có cột expiry (bỏ TTL, quyết định 2026-08-14) |
 | qr_code_token | VARCHAR(100) UNIQUE | YES | NULL | Token QR |
 | require_approval | BOOLEAN | NO | false | Bật chế độ duyệt |
 | only_admin_can_send | BOOLEAN | NO | false | true = nhóm dạng thông báo/broadcast, chỉ ADMIN/OWNER được gửi tin — Messaging Service check qua gRPC `CheckGroupRole` trước khi cho Member gửi |
@@ -1025,9 +1024,15 @@ Javadoc từng entity:
 - **#3-5 (QR code / invite link / reset) dùng chung 1 permission gate** `CAN_EDIT_GROUP_INFO` qua
   `GroupPermissionResolver` (`group/util/`, điểm check quyền duy nhất cho mọi service trong
   domain `group/`) — token sinh bằng `UUID.randomUUID().toString()` (giống pattern
-  `FriendQrTokenService`), ghi đè trực tiếp token cũ (không soft-invalidate). "Reset" invite link
-  và "revoke" invite link là 2 hành động riêng: reset = gọi lại `POST .../invite-link` (token mới
-  đè token cũ), revoke = `DELETE .../invite-link` (xoá token, không có token mới).
+  `FriendQrTokenService`), ghi đè trực tiếp token cũ (không soft-invalidate). "Reset" và "revoke"
+  là 2 hành động riêng, đối xứng cho CẢ QR VÀ invite link: reset = gọi lại
+  `POST .../qr-code`/`POST .../invite-link` (token mới đè token cũ), revoke =
+  `DELETE .../qr-code`/`DELETE .../invite-link` (xoá token, không sinh token mới).
+- **Bỏ hẳn TTL của invite link** (`invite_link_expires_at`, quyết định 2026-08-14) — spec cũ #4
+  cho phép đặt thời hạn hết hạn, nhưng rotate (reset) đã tự đủ để vô hiệu token bị lộ ngay lập
+  tức, không cần thêm cơ chế tự hết hạn theo thời gian; giữ TTL chỉ thêm phức tạp không tương ứng
+  với lợi ích thực tế. `GenerateInviteLinkRequest` (DTO nhận `expiresInMinutes`) bị xoá,
+  `POST /groups/{groupId}/invite-link` không nhận body nữa — cùng dạng với `POST .../qr-code`.
 
 ## **3.15 Last seen bền vững**
 

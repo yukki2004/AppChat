@@ -15,7 +15,6 @@ import org.springframework.web.bind.annotation.RestController;
 import com.chatapp.core.base.ApiResponse;
 import com.chatapp.core.group.GroupService;
 import com.chatapp.core.group.dto.request.CreateGroupRequest;
-import com.chatapp.core.group.dto.request.GenerateInviteLinkRequest;
 import com.chatapp.core.group.dto.request.UpdateGroupInfoRequest;
 import com.chatapp.core.group.dto.response.GroupInfoResponse;
 import com.chatapp.core.group.dto.response.GroupInviteLinkResponse;
@@ -54,12 +53,17 @@ public class GroupController {
         return ResponseEntity.ok(ApiResponse.ok(groupService.generateQrCode(userId, groupId)));
     }
 
+    @DeleteMapping("/{groupId}/qr-code")
+    public ResponseEntity<Void> revokeQrCode(
+            @RequestHeader("X-User-Id") UUID userId, @PathVariable UUID groupId) {
+        groupService.revokeQrCode(userId, groupId);
+        return ResponseEntity.noContent().build();
+    }
+
     @PostMapping("/{groupId}/invite-link")
     public ResponseEntity<ApiResponse<GroupInviteLinkResponse>> generateInviteLink(
-            @RequestHeader("X-User-Id") UUID userId, @PathVariable UUID groupId,
-            @Valid @RequestBody(required = false) GenerateInviteLinkRequest request) {
-        Long expiresInMinutes = request == null ? null : request.getExpiresInMinutes();
-        return ResponseEntity.ok(ApiResponse.ok(groupService.generateInviteLink(userId, groupId, expiresInMinutes)));
+            @RequestHeader("X-User-Id") UUID userId, @PathVariable UUID groupId) {
+        return ResponseEntity.ok(ApiResponse.ok(groupService.generateInviteLink(userId, groupId)));
     }
 
     @DeleteMapping("/{groupId}/invite-link")

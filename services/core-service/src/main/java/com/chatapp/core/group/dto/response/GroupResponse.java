@@ -16,8 +16,7 @@ public record GroupResponse(
         UUID createdBy,
         Instant createdAt,
         String qrCodeToken,
-        String inviteLinkToken,
-        Instant inviteLinkExpiresAt) {
+        String inviteLinkToken) {
 
     public static GroupResponse from(GroupEntity group) {
         return new GroupResponse(
@@ -31,7 +30,6 @@ public record GroupResponse(
                 group.getCreatedBy(),
                 group.getCreatedAt(),
                 group.getQrCodeToken(),
-                group.getInviteLinkToken(),
-                group.getInviteLinkExpiresAt());
+                group.getInviteLinkToken());
     }
 }

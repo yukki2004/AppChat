@@ -38,9 +38,6 @@ public class GroupEntity {
     @Column(name = "invite_link_token", unique = true, length = 100)
     private String inviteLinkToken;
 
-    @Column(name = "invite_link_expires_at")
-    private Instant inviteLinkExpiresAt;
-
     @Column(name = "qr_code_token", unique = true, length = 100)
     private String qrCodeToken;
 
@@ -109,18 +106,20 @@ public class GroupEntity {
         this.onlyAdminCanSend = onlyAdminCanSend;
     }
 
-    public void rotateInviteLink(String token, Instant expiresAt) {
+    public void rotateInviteLink(String token) {
         this.inviteLinkToken = token;
-        this.inviteLinkExpiresAt = expiresAt;
     }
 
     public void revokeInviteLink() {
         this.inviteLinkToken = null;
-        this.inviteLinkExpiresAt = null;
     }
 
     public void rotateQrCode(String token) {
         this.qrCodeToken = token;
+    }
+
+    public void revokeQrCode() {
+        this.qrCodeToken = null;
     }
 
     public void incrementMemberCount() {

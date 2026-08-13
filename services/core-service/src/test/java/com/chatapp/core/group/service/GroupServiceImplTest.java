@@ -167,48 +167,73 @@ class GroupServiceImplTest {
     }
 
     @Test
-    void generateInviteLink_withTtl_setsExpiryInTheFuture() {
+    void revokeQrCode_clearsToken_whenPresent() {
         GroupEntity group = someGroup("Group", null);
+        group.rotateQrCode("some-qr-token");
         stubEditableGroup(group);
 
-        GroupInviteLinkResponse result = groupService.generateInviteLink(actorId, groupId, 60L);
+        groupService.revokeQrCode(actorId, groupId);
 
-        assertThat(result.inviteLinkToken()).isNotNull();
-        assertThat(result.inviteLinkExpiresAt()).isAfter(java.time.Instant.now());
+        assertThat(group.getQrCodeToken()).isNull();
+        verify(groupRepository).save(group);
     }
 
     @Test
-    void generateInviteLink_withoutTtl_leavesExpiryNull() {
+    void revokeQrCode_isNoOp_whenNoQrCodeActive() {
         GroupEntity group = someGroup("Group", null);
         stubEditableGroup(group);
 
-        GroupInviteLinkResponse result = groupService.generateInviteLink(actorId, groupId, null);
+        groupService.revokeQrCode(actorId, groupId);
+
+        verify(groupRepository, never()).save(any());
+    }
+
+    @Test
+    void revokeQrCode_throwsPermissionDenied_beforeMutating() {
+        GroupEntity group = someGroup("Group", null);
+        group.rotateQrCode("some-qr-token");
+        stubEditableGroup(group);
+        doThrow(new AppException(ErrorCode.GROUP_PERMISSION_DENIED))
+                .when(groupPermissionResolver).requirePermission(any(), eq(GroupPermissionAction.CAN_EDIT_GROUP_INFO));
+
+        assertThatThrownBy(() -> groupService.revokeQrCode(actorId, groupId))
+                .isInstanceOf(AppException.class)
+                .extracting(ex -> ((AppException) ex).getErrorCode())
+                .isEqualTo(ErrorCode.GROUP_PERMISSION_DENIED);
+        assertThat(group.getQrCodeToken()).isEqualTo("some-qr-token");
+    }
+
+    @Test
+    void generateInviteLink_rotatesToken() {
+        GroupEntity group = someGroup("Group", null);
+        stubEditableGroup(group);
+
+        GroupInviteLinkResponse result = groupService.generateInviteLink(actorId, groupId);
 
         assertThat(result.inviteLinkToken()).isNotNull();
-        assertThat(result.inviteLinkExpiresAt()).isNull();
+        verify(groupRepository).save(group);
     }
 
     @Test
     void generateInviteLink_overwritesExistingToken_immediately() {
         GroupEntity group = someGroup("Group", null);
-        group.rotateInviteLink("old-token", null);
+        group.rotateInviteLink("old-token");
         stubEditableGroup(group);
 
-        GroupInviteLinkResponse result = groupService.generateInviteLink(actorId, groupId, null);
+        GroupInviteLinkResponse result = groupService.generateInviteLink(actorId, groupId);
 
         assertThat(result.inviteLinkToken()).isNotEqualTo("old-token");
     }
 
     @Test
-    void revokeInviteLink_clearsTokenAndExpiry_whenPresent() {
+    void revokeInviteLink_clearsToken_whenPresent() {
         GroupEntity group = someGroup("Group", null);
-        group.rotateInviteLink("some-token", java.time.Instant.now().plusSeconds(3600));
+        group.rotateInviteLink("some-token");
         stubEditableGroup(group);
 
         groupService.revokeInviteLink(actorId, groupId);
 
         assertThat(group.getInviteLinkToken()).isNull();
-        assertThat(group.getInviteLinkExpiresAt()).isNull();
         verify(groupRepository).save(group);
     }
 
@@ -225,7 +250,7 @@ class GroupServiceImplTest {
     @Test
     void revokeInviteLink_throwsPermissionDenied_beforeMutating() {
         GroupEntity group = someGroup("Group", null);
-        group.rotateInviteLink("some-token", null);
+        group.rotateInviteLink("some-token");
         stubEditableGroup(group);
         doThrow(new AppException(ErrorCode.GROUP_PERMISSION_DENIED))
                 .when(groupPermissionResolver).requirePermission(any(), eq(GroupPermissionAction.CAN_EDIT_GROUP_INFO));

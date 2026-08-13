@@ -1,7 +1,5 @@
 package com.chatapp.core.group.service;
 
-import java.time.Duration;
-import java.time.Instant;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -120,14 +118,30 @@ public class GroupServiceImpl implements GroupService {
 
     @Override
     @Transactional
-    public GroupInviteLinkResponse generateInviteLink(UUID actorId, UUID groupId, Long expiresInMinutes) {
+    public void revokeQrCode(UUID actorId, UUID groupId) {
+        log.debug("revokeQrCode start actorId={} groupId={}", actorId, groupId);
 
         GroupEntity group = requireEditableGroup(actorId, groupId);
-        Instant expiresAt = expiresInMinutes == null ? null : Instant.now().plus(Duration.ofMinutes(expiresInMinutes));
-        group.rotateInviteLink(UUID.randomUUID().toString(), expiresAt);
+        if (group.getQrCodeToken() == null) {
+            log.info("revokeQrCode no-op actorId={} groupId={} — no QR code was active", actorId, groupId);
+            return;
+        }
+
+        group.revokeQrCode();
         groupRepository.save(group);
 
-        return new GroupInviteLinkResponse(group.getInviteLinkToken(), group.getInviteLinkExpiresAt());
+        log.info("revokeQrCode success actorId={} groupId={}", actorId, groupId);
+    }
+
+    @Override
+    @Transactional
+    public GroupInviteLinkResponse generateInviteLink(UUID actorId, UUID groupId) {
+
+        GroupEntity group = requireEditableGroup(actorId, groupId);
+        group.rotateInviteLink(UUID.randomUUID().toString());
+        groupRepository.save(group);
+
+        return new GroupInviteLinkResponse(group.getInviteLinkToken());
     }
 
     @Override

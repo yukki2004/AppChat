@@ -5,7 +5,6 @@ CREATE TABLE groups (
     avatar_url              VARCHAR(500),
     description             TEXT,
     invite_link_token       VARCHAR(100) UNIQUE,
-    invite_link_expires_at  TIMESTAMPTZ,
     qr_code_token           VARCHAR(100) UNIQUE,
     require_approval        BOOLEAN NOT NULL DEFAULT FALSE,
     only_admin_can_send     BOOLEAN NOT NULL DEFAULT FALSE,

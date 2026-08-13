@@ -97,7 +97,16 @@ public enum ErrorCode {
     // auth/qrlogin (POST /auth/qr-login/init, GET .../device-info, POST .../confirm, .../claim)
     QR_LOGIN_SESSION_NOT_FOUND(9001, "Invalid or expired QR login session", HttpStatus.UNAUTHORIZED),
     QR_LOGIN_ALREADY_APPROVED(9002, "This QR login session was already approved", HttpStatus.CONFLICT),
-    QR_LOGIN_NOT_APPROVED_YET(9003, "This QR login session has not been approved yet", HttpStatus.UNAUTHORIZED);
+    QR_LOGIN_NOT_APPROVED_YET(9003, "This QR login session has not been approved yet", HttpStatus.UNAUTHORIZED),
+
+    // group/#1 (POST /groups)
+    GROUP_MIN_MEMBERS_NOT_MET(10002,
+            "A group needs at least 3 members including you", HttpStatus.BAD_REQUEST),
+
+    // group/#2, #3-5 (PATCH /groups/{groupId}, POST /groups/{groupId}/qr-code, .../invite-link)
+    GROUP_NOT_FOUND(10003, "Group not found", HttpStatus.NOT_FOUND),
+    GROUP_NOT_A_MEMBER(10004, "You are not a member of this group", HttpStatus.FORBIDDEN),
+    GROUP_PERMISSION_DENIED(10005, "You don't have permission to do this in this group", HttpStatus.FORBIDDEN);
 
     int code;
     String message;

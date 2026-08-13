@@ -755,7 +755,7 @@ identity-service/
 | **7** | **Bật/Tắt chế độ duyệt** | Admin/Owner toggle require_approval. |
 | **8** | **Duyệt thành viên** | Admin xem danh sách group_join_requests, approve/reject từng người hoặc bulk. |
 | **9** | **Thêm thành viên trực tiếp** | Member thêm bạn bè (nếu tắt duyệt). Admin thêm bất kỳ. TRƯỚC KHI add phải check `who_can_add_to_group` của người được thêm (gRPC `GetPrivacySettings`): EVERYONE/FRIENDS_ONLY → add thẳng như bình thường (vẫn phải thoả điều kiện quan hệ tương ứng); NOBODY → không add thẳng được, tạo `group_invite_pending` (trạng thái chờ người đó tự xác nhận muốn vào) thay vì thêm ngay, publish `group.invite_pending` để Notification báo cho người được mời. |
-| **9b** | **Giới hạn chống spam (tạo nhóm)** | Rate limit số nhóm tạo mới / ngày per user (gợi ý 10/ngày) — Redis `INCR` + `EXPIRE 86400` theo key `cache:rate_limit:group_create:{user_id}`, vượt ngưỡng trả lỗi `RATE_LIMIT_EXCEEDED`. (Rate limit + cooldown cho friend request đã bị bỏ hẳn — quyết định: không giới hạn số lời mời kết bạn/ngày, không cooldown sau khi bị từ chối.) |
+| **9b** | ~~Giới hạn chống spam (tạo nhóm)~~ | Bỏ hẳn (quyết định 2026-08-12) — không rate limit số nhóm tạo mới/ngày per user. Cùng hướng với quyết định bỏ rate limit + cooldown cho friend request bên dưới. |
 | **10** | **Xoá thành viên** | Admin/Owner kick member. Publish event group.member_removed. |
 | **11** | **Phong Admin** | Owner set role=ADMIN cho member. |
 | **12** | **Thu hồi Admin** | Owner set role=MEMBER. |
@@ -1016,6 +1016,18 @@ Javadoc từng entity:
   `group_member_nicknames`/`group_event_rsvp`/`group_admin_permissions`) — quyết định giữ nguyên
   dù về bản chất cặp này có thể làm PK (không có tình huống đổi vai như `requester_id`/
   `addressee_id` ở `friendships`); có thể đổi sang composite key sau nếu cần.
+- **#2 (đổi tên/ảnh/description) — phần `avatar_url` tạm chưa code** (2026-08-12): chỉ
+  `PATCH /groups/{groupId}` đổi `name`/`description` là chạy được ngay, đổi `avatar_url` để lại
+  TODO trong `GroupServiceImpl.updateInfo()` tới khi codebase có gRPC/REST client gọi Media
+  Service — client phải tự upload qua Media Service lấy CDN URL trước rồi mới gọi endpoint này,
+  Core không tự tải ảnh (nguyên tắc #8 root CLAUDE.md, giống quyết định OAuth avatar ở "Lưu ý khi
+  code" #15).
+- **#3-5 (QR code / invite link / reset) dùng chung 1 permission gate** `CAN_EDIT_GROUP_INFO` qua
+  `GroupPermissionResolver` (`group/util/`, điểm check quyền duy nhất cho mọi service trong
+  domain `group/`) — token sinh bằng `UUID.randomUUID().toString()` (giống pattern
+  `FriendQrTokenService`), ghi đè trực tiếp token cũ (không soft-invalidate). "Reset" invite link
+  và "revoke" invite link là 2 hành động riêng: reset = gọi lại `POST .../invite-link` (token mới
+  đè token cũ), revoke = `DELETE .../invite-link` (xoá token, không có token mới).
 
 ## **3.15 Last seen bền vững**
 

@@ -112,7 +112,14 @@ public enum ErrorCode {
     GROUP_INVITE_INVALID(10006, "This QR code or invite link is invalid or has expired", HttpStatus.NOT_FOUND),
     GROUP_MEMBER_LIMIT_REACHED(10007, "This group has reached its member limit", HttpStatus.CONFLICT),
     GROUP_ALREADY_MEMBER(10008, "This user is already a member of this group", HttpStatus.CONFLICT),
-    GROUP_JOIN_REQUEST_NOT_FOUND(10009, "Join request not found or already reviewed", HttpStatus.NOT_FOUND);
+    GROUP_JOIN_REQUEST_NOT_FOUND(10009, "Join request not found or already reviewed", HttpStatus.NOT_FOUND),
+
+    // group/#10-12 (DELETE /groups/{groupId}/members/{userId}, POST|DELETE .../admins/{userId})
+    GROUP_TARGET_NOT_A_MEMBER(10010, "This user is not a member of this group", HttpStatus.NOT_FOUND),
+    GROUP_CANNOT_KICK_OWNER_OR_ADMIN(10011,
+            "You cannot kick the group owner or another admin", HttpStatus.FORBIDDEN),
+    GROUP_TARGET_ALREADY_ADMIN(10012, "This user is already an admin of this group", HttpStatus.CONFLICT),
+    GROUP_TARGET_NOT_AN_ADMIN(10013, "This user is not an admin of this group", HttpStatus.NOT_FOUND);
 
     int code;
     String message;

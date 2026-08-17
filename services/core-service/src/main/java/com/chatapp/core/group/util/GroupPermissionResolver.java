@@ -42,6 +42,16 @@ public class GroupPermissionResolver {
         }
     }
 
+    /** Owner-only actions (promote/demote admin, transfer ownership) are a fixed rule, not a
+     *  granular flag in {@code group_admin_permissions} — no cờ nào bật lên cho Admin. */
+    public void requireOwner(GroupMemberEntity actorMembership) {
+        if (actorMembership.getRole() != GroupMemberRole.OWNER) {
+            log.warn("group permission denied groupId={} userId={} role={} action=OWNER_ONLY",
+                    actorMembership.getGroupId(), actorMembership.getUserId(), actorMembership.getRole());
+            throw new AppException(ErrorCode.GROUP_PERMISSION_DENIED);
+        }
+    }
+
     public boolean canPerform(GroupMemberEntity actorMembership, GroupPermissionAction action) {
         GroupMemberRole role = actorMembership.getRole();
         if (role == GroupMemberRole.OWNER) {

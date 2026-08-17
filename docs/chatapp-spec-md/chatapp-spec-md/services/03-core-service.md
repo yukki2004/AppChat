@@ -1096,6 +1096,31 @@ Javadoc từng entity:
   - **Response DTO dùng chung 1 enum** `GroupJoinOutcome` (`JOINED`/`PENDING_APPROVAL`) cho cả
     `JoinGroupResponse` (join qua token) và `AddMemberResponse` (add trực tiếp) — tránh 2 chuỗi
     "magic string" lệch nhau giữa 2 luồng cùng ý nghĩa.
+- **#10 (kick), #11 (phong Admin), #12 (thu hồi Admin) đã code (2026-08-17)** — thêm vào
+  `GroupMemberServiceImpl`/`GroupMemberController`, chưa dùng `GroupLockService` (advisory lock
+  theo `group_id` ở mục Concurrency của plan gốc) — cùng gap với `addMember`/`joinByToken`/
+  `approveJoinRequest` hiện tại, tất cả đều CHƯA lock, nối lại khi `GroupLockService` được viết:
+  - **`DELETE /groups/{groupId}/members/{userId}`** (`kickMember`) — actor cần `CAN_KICK_MEMBERS`
+    qua `GroupPermissionResolver`. Rule cố định (không nằm trong `group_admin_permissions`, không
+    ai cấu hình được): **không kick được Owner**, **không kick được Admin khác trừ khi actor là
+    Owner** — cả 2 tự nhiên chặn luôn self-kick (Owner/Admin kick chính mình bị chặn bởi đúng 2
+    rule này, MEMBER thì không có `CAN_KICK_MEMBERS` nên bị chặn từ bước permission) →
+    `GROUP_CANNOT_KICK_OWNER_OR_ADMIN` (403). Set `is_active=false, left_at=now()`, giảm
+    `groups.member_count`, xoá row `group_admin_permissions` nếu target là Admin, publish
+    `group.member_removed` (`GroupMemberRemovedMessage{userId, removedBy}`). Target không active
+    trong nhóm → `GROUP_TARGET_NOT_A_MEMBER` (404, tách riêng khỏi `GROUP_NOT_A_MEMBER` vì đó nói
+    về actor, không phải target).
+  - **`POST /groups/{groupId}/admins/{userId}`** (`promoteToAdmin`) — CHỈ Owner (fixed rule, đi
+    qua `GroupPermissionResolver#requireOwner` mới thêm, không phải 1 cờ trong
+    `group_admin_permissions`). Target phải đang là MEMBER active, đã là Admin/Owner →
+    `GROUP_TARGET_ALREADY_ADMIN` (409). Set role=ADMIN, insert `group_admin_permissions` full-true
+    default (constructor có sẵn), publish `group.role_changed`
+    (`GroupRoleChangedMessage{userId, newRole, changedBy}`).
+  - **`DELETE /groups/{groupId}/admins/{userId}`** (`demoteToMember`) — CHỈ Owner. Target phải
+    đang là ADMIN, không phải → `GROUP_TARGET_NOT_AN_ADMIN` (404). Set role=MEMBER, xoá row
+    `group_admin_permissions`, publish `group.role_changed`.
+  - **#13 (chuyển Owner) CHƯA code** — nằm ngoài scope lượt này, để riêng vì cần bàn thêm cách xử
+    lý concurrency (advisory lock) trước khi code.
 
 ## **3.15 Last seen bền vững**
 

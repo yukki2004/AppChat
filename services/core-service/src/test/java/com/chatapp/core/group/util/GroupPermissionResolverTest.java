@@ -109,6 +109,25 @@ class GroupPermissionResolverTest {
     }
 
     @Test
+    void requireOwner_doesNothing_whenOwner() {
+        GroupMemberEntity owner = new GroupMemberEntity(groupId, userId, GroupMemberRole.OWNER, null);
+
+        resolver.requireOwner(owner);
+        // No exception — success.
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = GroupMemberRole.class, names = "OWNER", mode = EnumSource.Mode.EXCLUDE)
+    void requireOwner_throwsPermissionDenied_whenNotOwner(GroupMemberRole role) {
+        GroupMemberEntity actor = new GroupMemberEntity(groupId, userId, role, null);
+
+        assertThatThrownBy(() -> resolver.requireOwner(actor))
+                .isInstanceOf(AppException.class)
+                .extracting(ex -> ((AppException) ex).getErrorCode())
+                .isEqualTo(ErrorCode.GROUP_PERMISSION_DENIED);
+    }
+
+    @Test
     void requireActiveMember_returnsMembership_whenPresent() {
         GroupMemberEntity member = new GroupMemberEntity(groupId, userId, GroupMemberRole.MEMBER, null);
         when(groupMemberRepository.findByGroupIdAndUserIdAndIsActiveTrue(groupId, userId)).thenReturn(Optional.of(member));

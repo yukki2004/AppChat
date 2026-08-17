@@ -523,7 +523,20 @@ cấp 1 token ngẫu nhiên (UUID v4) đại diện cho user gọi, lưu Redis
 KHÔNG single-use — cùng 1 token vẫn resolve được cho tới khi hết TTL, vì QR đứng yên trên màn
 hình cho nhiều người quét lần lượt, khác OTP dùng 1 lần. FE tự quyết định encode gì vào ảnh QR
 (token trần, hay 1 URL chứa token) — Core Service không quan tâm định dạng QR, chỉ cấp/resolve
-token. `POST /friends/requests/qr` nhận `{qrToken, message}`, resolve token ra `addressee_id`
+token.
+
+**Khuyến nghị encode QR (quyết định của FE, ghi lại đây để khỏi lệch giữa các client)**: encode
+1 URL đầy đủ (VD `https://<web-domain>/add-friend?token={token}`), KHÔNG encode token trần —
+QR chứa URL mới quét được bằng bất kỳ app quét QR nào (camera hệ thống, app khác), không chỉ
+quét được từ đúng màn hình "Quét QR" tự viết trong app/web mình. Trang `/add-friend` (FE tự
+route, không phải endpoint của Core Service) đọc `token` từ query string, bắt login nếu chưa
+đăng nhập (quay lại trang này sau khi login xong), rồi gọi `POST /friends/requests/qr` với
+token đó. Nếu FE (web) làm trước app: vẫn dùng chung 1 route `/add-friend` này, quét bằng camera
+trình duyệt (`getUserMedia` + lib decode QR phía client như `jsQR`/`html5-qrcode`) chỉ là 1 cách
+khác để lấy được URL đó — không bắt buộc, vì URL cũng mở được trực tiếp bằng camera hệ thống
+điện thoại như bình thường.
+
+`POST /friends/requests/qr` nhận `{qrToken, message}`, resolve token ra `addressee_id`
 rồi chạy lại NGUYÊN luồng #19 (`sendRequest`) — không có guard/check riêng cho nhánh QR, token
 chỉ là cách khác để cung cấp `addresseeId`. Token invalid/hết hạn → `FRIEND_QR_TOKEN_INVALID`
 (404), không phân biệt "chưa từng tồn tại" hay "đã hết hạn" trong message trả về.
@@ -750,11 +763,11 @@ identity-service/
 | **2** | **Đổi tên, ảnh nhóm** | Admin/Owner update group name, avatar_url. |
 | **3** | **Tạo QR Code tham gia** | Generate qr_code_token unique. Client render thành QR image. |
 | **4** | **Tạo Invite Link** | Generate invite_link_token unique. Không có thời hạn hết hạn tự động (quyết định 2026-08-14 — bỏ hẳn khỏi scope, xem "Lưu ý khi code" bên dưới); lộ thì rotate lại là đủ. |
-| **5** | **Làm mới / Xoá QR / Invite link** | Reset (rotate) hoặc revoke (xoá hẳn, không sinh token mới) — đối xứng cho cả QR và invite link, mỗi cái có endpoint revoke riêng. Token cũ vô hiệu ngay khi rotate hoặc revoke. |
-| **6** | **Tham gia qua Link/QR** | Nếu require_approval=false → add ngay. Nếu true → tạo join request. |
+| **5** | **Reset QR / Invite link** | Reset (rotate) — thu hồi token cũ và cấp token mới trong 1 lần gọi (`POST .../qr-code/reset`, `POST .../invite-link/reset`), đối xứng cho cả QR và invite link. Không có khái niệm "revoke xoá hẳn, không sinh token mới" (bỏ 2026-08-16). |
+| **6** | **Tham gia qua Link/QR** | `GET /groups/preview?token=` xem trước (read-only) → `POST /groups/join` mới thật sự tham gia. Nếu require_approval=false → add ngay. Nếu true → tạo join request. Đã code (2026-08-16), xem "Lưu ý khi code". |
 | **7** | **Bật/Tắt chế độ duyệt** | Admin/Owner toggle require_approval. |
-| **8** | **Duyệt thành viên** | Admin xem danh sách group_join_requests, approve/reject từng người hoặc bulk. |
-| **9** | **Thêm thành viên trực tiếp** | Member thêm bạn bè (nếu tắt duyệt). Admin thêm bất kỳ. TRƯỚC KHI add phải check `who_can_add_to_group` của người được thêm (gRPC `GetPrivacySettings`): EVERYONE/FRIENDS_ONLY → add thẳng như bình thường (vẫn phải thoả điều kiện quan hệ tương ứng); NOBODY → không add thẳng được, tạo `group_invite_pending` (trạng thái chờ người đó tự xác nhận muốn vào) thay vì thêm ngay, publish `group.invite_pending` để Notification báo cho người được mời. |
+| **8** | **Duyệt thành viên** | Admin xem danh sách group_join_requests (`GET .../join-requests`), approve/reject từng người (`POST .../join-requests/{id}/approve`\|`reject`) — CHƯA làm bulk, mỗi lần 1 request. Đã code (2026-08-16). |
+| **9** | **Thêm thành viên trực tiếp** | Member thêm bạn bè (nếu tắt duyệt, không thì rơi vào `group_join_requests` với `invited_by`). Admin/Owner thêm bất kỳ, luôn bypass duyệt. Đã code (2026-08-16), xem "Lưu ý khi code". **Phần check `who_can_add_to_group` (gRPC `GetPrivacySettings`) VẪN LÀ TODO** — chưa có gRPC client, `group_invite_pending` chưa tồn tại, mọi target hiện coi như addable. |
 | **9b** | ~~Giới hạn chống spam (tạo nhóm)~~ | Bỏ hẳn (quyết định 2026-08-12) — không rate limit số nhóm tạo mới/ngày per user. Cùng hướng với quyết định bỏ rate limit + cooldown cho friend request bên dưới. |
 | **10** | **Xoá thành viên** | Admin/Owner kick member. Publish event group.member_removed. |
 | **11** | **Phong Admin** | Owner set role=ADMIN cho member. |
@@ -1024,15 +1037,65 @@ Javadoc từng entity:
 - **#3-5 (QR code / invite link / reset) dùng chung 1 permission gate** `CAN_EDIT_GROUP_INFO` qua
   `GroupPermissionResolver` (`group/util/`, điểm check quyền duy nhất cho mọi service trong
   domain `group/`) — token sinh bằng `UUID.randomUUID().toString()` (giống pattern
-  `FriendQrTokenService`), ghi đè trực tiếp token cũ (không soft-invalidate). "Reset" và "revoke"
-  là 2 hành động riêng, đối xứng cho CẢ QR VÀ invite link: reset = gọi lại
-  `POST .../qr-code`/`POST .../invite-link` (token mới đè token cũ), revoke =
-  `DELETE .../qr-code`/`DELETE .../invite-link` (xoá token, không sinh token mới).
+  `FriendQrTokenService`), ghi đè trực tiếp token cũ (không soft-invalidate).
+- **Bỏ khái niệm "revoke" (xoá hẳn, không sinh token mới)** — quyết định 2026-08-16: không có
+  nhu cầu sản phẩm thật sự cho trạng thái "tắt hẳn QR/invite link", chỉ có nhu cầu "tôi sợ QR/link
+  bị lộ, đổi ngay cái mới". `DELETE /groups/{groupId}/qr-code` và
+  `DELETE /groups/{groupId}/invite-link` (null hoá token) đã bị xoá, thay bằng
+  `POST /groups/{groupId}/qr-code/reset` và `POST /groups/{groupId}/invite-link/reset` — thu hồi
+  token cũ VÀ cấp token mới trong đúng 1 lần gọi (`GroupServiceImpl.resetQrCode`/
+  `resetInviteLink`, rotate ngay cả khi trước đó chưa có token nào active), trả về token mới
+  trong response body (`GroupQrCodeResponse`/`GroupInviteLinkResponse`) — không còn `204 No
+  Content` như revoke cũ. `POST .../qr-code`/`POST .../invite-link` (không có hậu tố `/reset`)
+  vẫn giữ nguyên, hành vi thực chất giống hệt reset (cũng rotate vô điều kiện) — tách riêng 2
+  route chỉ để FE có 2 nút ngữ nghĩa rõ ràng ("Tạo QR" lần đầu vs "Reset" khi lo bị lộ), không
+  phải 2 luồng nghiệp vụ khác nhau.
 - **Bỏ hẳn TTL của invite link** (`invite_link_expires_at`, quyết định 2026-08-14) — spec cũ #4
   cho phép đặt thời hạn hết hạn, nhưng rotate (reset) đã tự đủ để vô hiệu token bị lộ ngay lập
   tức, không cần thêm cơ chế tự hết hạn theo thời gian; giữ TTL chỉ thêm phức tạp không tương ứng
   với lợi ích thực tế. `GenerateInviteLinkRequest` (DTO nhận `expiresInMinutes`) bị xoá,
   `POST /groups/{groupId}/invite-link` không nhận body nữa — cùng dạng với `POST .../qr-code`.
+- **#6 (join qua QR/link), #8 (duyệt thành viên), #9 (thêm trực tiếp) đã code (2026-08-16)** —
+  package mới `group/service/`: `GroupJoinServiceImpl` (preview/join/list/approve/reject) +
+  `GroupMemberServiceImpl` (add trực tiếp), controller `GroupJoinController`/
+  `GroupMemberController`. Chi tiết:
+  - **`GET /groups/preview?token=xxx`** — resolve QR/invite-link token (thử `qr_code_token`
+    trước, fallback `invite_link_token`) ra `{id, name, avatarUrl, memberCount,
+    requireApproval}`, **read-only, không có side-effect** — an toàn gọi mỗi lần trang FE load
+    trước khi user bấm "Tham gia". Token không hợp lệ/nhóm đã xoá → `GROUP_INVITE_INVALID` (404).
+  - **`POST /groups/join {token}`** — mới THẬT SỰ join. `require_approval=false` → add thẳng
+    (`GroupJoinOutcome.JOINED`); `true` → insert `group_join_requests` PENDING
+    (`GroupJoinOutcome.PENDING_APPROVAL`), publish `group.join_request`. Đã là member active →
+    `GROUP_ALREADY_MEMBER` (409). Full (`member_count >= max_members`) → `GROUP_MEMBER_LIMIT_
+    REACHED` (409) — check này nằm trong `GroupMembershipMutator.addMemberDirectly` (điểm DUY
+    NHẤT thêm row `group_members`/tăng `member_count`/publish `group.member_joined`, dùng chung
+    bởi join-by-token, approve, VÀ add trực tiếp — không path nào tự ý thêm member ngoài đây).
+  - **Chống spam duplicate request**: `GroupMembershipMutator.createOrReuseJoinRequest` check
+    tồn tại request PENDING của đúng `(group_id, user_id)` trước khi insert — quét lại cùng QR
+    nhiều lần trong lúc chờ duyệt KHÔNG tạo thêm row mới (không publish `group.join_request`
+    thêm lần nữa), khớp unique index `idx_group_join_requests_pending` đã có sẵn ở migration
+    `V20260812100000`.
+  - **`GET /groups/{groupId}/join-requests`**, **`POST .../join-requests/{requestId}/approve`**,
+    **`POST .../join-requests/{requestId}/reject {reason?}`** — cần `CAN_APPROVE_MEMBERS` qua
+    `GroupPermissionResolver`. Request không tồn tại HOẶC đã review rồi (không còn PENDING) đều
+    trả `GROUP_JOIN_REQUEST_NOT_FOUND` (404) — không phân biệt 2 trường hợp trong response,
+    giống cách `FRIEND_QR_TOKEN_INVALID` không phân biệt "chưa từng có" hay "hết hạn".
+  - **`POST /groups/{groupId}/members {userId}`** (`GroupMemberServiceImpl.addMember`) — actor
+    phải đang active trong nhóm. **Admin/Owner luôn bypass `require_approval`** (add thẳng luôn,
+    vì chính họ là người duyệt); **Member thường** add thẳng được CHỈ KHI `require_approval=
+    false`, còn lại rơi vào `group_join_requests` với `invited_by=actorId` (phân biệt với tự
+    xin vào qua token, `invited_by=NULL`) — dùng lại đúng
+    `GroupMembershipMutator.createOrReuseJoinRequest`, publish `group.join_request` y hệt nhánh
+    join-by-token. Target đã active → `GROUP_ALREADY_MEMBER`; target không tồn tại →
+    `USER_NOT_FOUND`.
+  - **CHƯA làm — TODO privacy check `who_can_add_to_group`** (gRPC `GetPrivacySettings`, nhánh
+    NOBODY → `group_invite_pending`, spec #9 nguyên bản): client gRPC đó chưa tồn tại trong
+    codebase (giống TODO đã có sẵn ở `GroupServiceImpl#createGroup`), nên MỌI target hiện tại
+    đều coi như addable — `group_invite_pending` (bảng riêng, khác `group_join_requests`) CHƯA
+    được tạo, entity CHƯA tồn tại. Nối lại nhánh này khi có gRPC client thật.
+  - **Response DTO dùng chung 1 enum** `GroupJoinOutcome` (`JOINED`/`PENDING_APPROVAL`) cho cả
+    `JoinGroupResponse` (join qua token) và `AddMemberResponse` (add trực tiếp) — tránh 2 chuỗi
+    "magic string" lệch nhau giữa 2 luồng cùng ý nghĩa.
 
 ## **3.15 Last seen bền vững**
 

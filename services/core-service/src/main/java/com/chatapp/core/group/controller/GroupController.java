@@ -3,7 +3,6 @@ package com.chatapp.core.group.controller;
 import java.util.UUID;
 
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -53,11 +52,10 @@ public class GroupController {
         return ResponseEntity.ok(ApiResponse.ok(groupService.generateQrCode(userId, groupId)));
     }
 
-    @DeleteMapping("/{groupId}/qr-code")
-    public ResponseEntity<Void> revokeQrCode(
+    @PostMapping("/{groupId}/qr-code/reset")
+    public ResponseEntity<ApiResponse<GroupQrCodeResponse>> resetQrCode(
             @RequestHeader("X-User-Id") UUID userId, @PathVariable UUID groupId) {
-        groupService.revokeQrCode(userId, groupId);
-        return ResponseEntity.noContent().build();
+        return ResponseEntity.ok(ApiResponse.ok(groupService.resetQrCode(userId, groupId)));
     }
 
     @PostMapping("/{groupId}/invite-link")
@@ -66,10 +64,9 @@ public class GroupController {
         return ResponseEntity.ok(ApiResponse.ok(groupService.generateInviteLink(userId, groupId)));
     }
 
-    @DeleteMapping("/{groupId}/invite-link")
-    public ResponseEntity<Void> revokeInviteLink(
+    @PostMapping("/{groupId}/invite-link/reset")
+    public ResponseEntity<ApiResponse<GroupInviteLinkResponse>> resetInviteLink(
             @RequestHeader("X-User-Id") UUID userId, @PathVariable UUID groupId) {
-        groupService.revokeInviteLink(userId, groupId);
-        return ResponseEntity.noContent().build();
+        return ResponseEntity.ok(ApiResponse.ok(groupService.resetInviteLink(userId, groupId)));
     }
 }

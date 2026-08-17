@@ -118,19 +118,15 @@ public class GroupServiceImpl implements GroupService {
 
     @Override
     @Transactional
-    public void revokeQrCode(UUID actorId, UUID groupId) {
-        log.debug("revokeQrCode start actorId={} groupId={}", actorId, groupId);
+    public GroupQrCodeResponse resetQrCode(UUID actorId, UUID groupId) {
+        log.debug("resetQrCode start actorId={} groupId={}", actorId, groupId);
 
         GroupEntity group = requireEditableGroup(actorId, groupId);
-        if (group.getQrCodeToken() == null) {
-            log.info("revokeQrCode no-op actorId={} groupId={} — no QR code was active", actorId, groupId);
-            return;
-        }
-
-        group.revokeQrCode();
+        group.rotateQrCode(UUID.randomUUID().toString());
         groupRepository.save(group);
 
-        log.info("revokeQrCode success actorId={} groupId={}", actorId, groupId);
+        log.info("resetQrCode success actorId={} groupId={} — old QR code invalidated", actorId, groupId);
+        return new GroupQrCodeResponse(group.getQrCodeToken());
     }
 
     @Override
@@ -146,19 +142,15 @@ public class GroupServiceImpl implements GroupService {
 
     @Override
     @Transactional
-    public void revokeInviteLink(UUID actorId, UUID groupId) {
-        log.debug("revokeInviteLink start actorId={} groupId={}", actorId, groupId);
+    public GroupInviteLinkResponse resetInviteLink(UUID actorId, UUID groupId) {
+        log.debug("resetInviteLink start actorId={} groupId={}", actorId, groupId);
 
         GroupEntity group = requireEditableGroup(actorId, groupId);
-        if (group.getInviteLinkToken() == null) {
-            log.info("revokeInviteLink no-op actorId={} groupId={} — no invite link was active", actorId, groupId);
-            return;
-        }
-
-        group.revokeInviteLink();
+        group.rotateInviteLink(UUID.randomUUID().toString());
         groupRepository.save(group);
 
-        log.info("revokeInviteLink success actorId={} groupId={}", actorId, groupId);
+        log.info("resetInviteLink success actorId={} groupId={} — old invite link invalidated", actorId, groupId);
+        return new GroupInviteLinkResponse(group.getInviteLinkToken());
     }
 
 

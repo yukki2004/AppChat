@@ -110,16 +110,8 @@ public class GroupEntity {
         this.inviteLinkToken = token;
     }
 
-    public void revokeInviteLink() {
-        this.inviteLinkToken = null;
-    }
-
     public void rotateQrCode(String token) {
         this.qrCodeToken = token;
-    }
-
-    public void revokeQrCode() {
-        this.qrCodeToken = null;
     }
 
     public void incrementMemberCount() {

@@ -10,4 +10,8 @@ import com.chatapp.core.base.entity.GroupEntity;
 public interface GroupRepository extends JpaRepository<GroupEntity, UUID> {
 
     Optional<GroupEntity> findByIdAndIsDeletedFalse(UUID id);
+
+    Optional<GroupEntity> findByQrCodeTokenAndIsDeletedFalse(String qrCodeToken);
+
+    Optional<GroupEntity> findByInviteLinkTokenAndIsDeletedFalse(String inviteLinkToken);
 }

@@ -54,10 +54,6 @@ public class GroupPermissionResolver {
         GroupAdminPermissionId id = new GroupAdminPermissionId(actorMembership.getGroupId(), actorMembership.getUserId());
         GroupAdminPermissionEntity permission = groupAdminPermissionRepository.findById(id).orElse(null);
         if (permission == null) {
-            // Every promotion to ADMIN inserts a full-true row (see #11) — a missing row here
-            // means that insert never happened, not that the Admin should be locked out, so fail
-            // open to the "Admin has full permission by default" baseline instead of surprising
-            // every existing Admin with a sudden permission denial.
             return true;
         }
         return switch (action) {

@@ -167,36 +167,38 @@ class GroupServiceImplTest {
     }
 
     @Test
-    void revokeQrCode_clearsToken_whenPresent() {
+    void resetQrCode_rotatesToken_whenPresent() {
         GroupEntity group = someGroup("Group", null);
         group.rotateQrCode("some-qr-token");
         stubEditableGroup(group);
 
-        groupService.revokeQrCode(actorId, groupId);
+        GroupQrCodeResponse result = groupService.resetQrCode(actorId, groupId);
 
-        assertThat(group.getQrCodeToken()).isNull();
+        assertThat(result.qrCodeToken()).isNotEqualTo("some-qr-token");
+        assertThat(group.getQrCodeToken()).isEqualTo(result.qrCodeToken());
         verify(groupRepository).save(group);
     }
 
     @Test
-    void revokeQrCode_isNoOp_whenNoQrCodeActive() {
+    void resetQrCode_generatesToken_whenNoneActive() {
         GroupEntity group = someGroup("Group", null);
         stubEditableGroup(group);
 
-        groupService.revokeQrCode(actorId, groupId);
+        GroupQrCodeResponse result = groupService.resetQrCode(actorId, groupId);
 
-        verify(groupRepository, never()).save(any());
+        assertThat(result.qrCodeToken()).isNotNull();
+        verify(groupRepository).save(group);
     }
 
     @Test
-    void revokeQrCode_throwsPermissionDenied_beforeMutating() {
+    void resetQrCode_throwsPermissionDenied_beforeMutating() {
         GroupEntity group = someGroup("Group", null);
         group.rotateQrCode("some-qr-token");
         stubEditableGroup(group);
         doThrow(new AppException(ErrorCode.GROUP_PERMISSION_DENIED))
                 .when(groupPermissionResolver).requirePermission(any(), eq(GroupPermissionAction.CAN_EDIT_GROUP_INFO));
 
-        assertThatThrownBy(() -> groupService.revokeQrCode(actorId, groupId))
+        assertThatThrownBy(() -> groupService.resetQrCode(actorId, groupId))
                 .isInstanceOf(AppException.class)
                 .extracting(ex -> ((AppException) ex).getErrorCode())
                 .isEqualTo(ErrorCode.GROUP_PERMISSION_DENIED);
@@ -226,36 +228,38 @@ class GroupServiceImplTest {
     }
 
     @Test
-    void revokeInviteLink_clearsToken_whenPresent() {
+    void resetInviteLink_rotatesToken_whenPresent() {
         GroupEntity group = someGroup("Group", null);
         group.rotateInviteLink("some-token");
         stubEditableGroup(group);
 
-        groupService.revokeInviteLink(actorId, groupId);
+        GroupInviteLinkResponse result = groupService.resetInviteLink(actorId, groupId);
 
-        assertThat(group.getInviteLinkToken()).isNull();
+        assertThat(result.inviteLinkToken()).isNotEqualTo("some-token");
+        assertThat(group.getInviteLinkToken()).isEqualTo(result.inviteLinkToken());
         verify(groupRepository).save(group);
     }
 
     @Test
-    void revokeInviteLink_isNoOp_whenNoLinkActive() {
+    void resetInviteLink_generatesToken_whenNoneActive() {
         GroupEntity group = someGroup("Group", null);
         stubEditableGroup(group);
 
-        groupService.revokeInviteLink(actorId, groupId);
+        GroupInviteLinkResponse result = groupService.resetInviteLink(actorId, groupId);
 
-        verify(groupRepository, never()).save(any());
+        assertThat(result.inviteLinkToken()).isNotNull();
+        verify(groupRepository).save(group);
     }
 
     @Test
-    void revokeInviteLink_throwsPermissionDenied_beforeMutating() {
+    void resetInviteLink_throwsPermissionDenied_beforeMutating() {
         GroupEntity group = someGroup("Group", null);
         group.rotateInviteLink("some-token");
         stubEditableGroup(group);
         doThrow(new AppException(ErrorCode.GROUP_PERMISSION_DENIED))
                 .when(groupPermissionResolver).requirePermission(any(), eq(GroupPermissionAction.CAN_EDIT_GROUP_INFO));
 
-        assertThatThrownBy(() -> groupService.revokeInviteLink(actorId, groupId))
+        assertThatThrownBy(() -> groupService.resetInviteLink(actorId, groupId))
                 .isInstanceOf(AppException.class)
                 .extracting(ex -> ((AppException) ex).getErrorCode())
                 .isEqualTo(ErrorCode.GROUP_PERMISSION_DENIED);

@@ -16,9 +16,9 @@ public interface GroupService {
 
     GroupQrCodeResponse generateQrCode(UUID actorId, UUID groupId);
 
-    void revokeQrCode(UUID actorId, UUID groupId);
+    GroupQrCodeResponse resetQrCode(UUID actorId, UUID groupId);
 
     GroupInviteLinkResponse generateInviteLink(UUID actorId, UUID groupId);
 
-    void revokeInviteLink(UUID actorId, UUID groupId);
+    GroupInviteLinkResponse resetInviteLink(UUID actorId, UUID groupId);
 }

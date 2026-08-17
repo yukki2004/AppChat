@@ -106,7 +106,13 @@ public enum ErrorCode {
     // group/#2, #3-5 (PATCH /groups/{groupId}, POST /groups/{groupId}/qr-code, .../invite-link)
     GROUP_NOT_FOUND(10003, "Group not found", HttpStatus.NOT_FOUND),
     GROUP_NOT_A_MEMBER(10004, "You are not a member of this group", HttpStatus.FORBIDDEN),
-    GROUP_PERMISSION_DENIED(10005, "You don't have permission to do this in this group", HttpStatus.FORBIDDEN);
+    GROUP_PERMISSION_DENIED(10005, "You don't have permission to do this in this group", HttpStatus.FORBIDDEN),
+
+    // group/#6,8,9 (POST /groups/join, /groups/{groupId}/members, join-requests approve/reject)
+    GROUP_INVITE_INVALID(10006, "This QR code or invite link is invalid or has expired", HttpStatus.NOT_FOUND),
+    GROUP_MEMBER_LIMIT_REACHED(10007, "This group has reached its member limit", HttpStatus.CONFLICT),
+    GROUP_ALREADY_MEMBER(10008, "This user is already a member of this group", HttpStatus.CONFLICT),
+    GROUP_JOIN_REQUEST_NOT_FOUND(10009, "Join request not found or already reviewed", HttpStatus.NOT_FOUND);
 
     int code;
     String message;

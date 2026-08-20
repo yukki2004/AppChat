@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataIntegrityViolationException;
 
 import com.chatapp.core.base.OutboxEventPublisher;
 import com.chatapp.core.base.constant.GroupMemberRole;
@@ -34,7 +35,6 @@ import com.chatapp.core.exception.common.AppException;
 import com.chatapp.core.exception.common.ErrorCode;
 import com.chatapp.core.group.dto.response.AddMemberResponse;
 import com.chatapp.core.group.dto.response.GroupJoinOutcome;
-import com.chatapp.core.group.util.GroupLockService;
 import com.chatapp.core.group.util.GroupPermissionAction;
 import com.chatapp.core.group.util.GroupPermissionResolver;
 
@@ -54,8 +54,6 @@ class GroupMemberServiceImplTest {
     @Mock
     private GroupMembershipMutator groupMembershipMutator;
     @Mock
-    private GroupLockService groupLockService;
-    @Mock
     private OutboxEventPublisher outboxEventPublisher;
 
     private GroupMemberServiceImpl groupMemberService;
@@ -68,7 +66,7 @@ class GroupMemberServiceImplTest {
     void setUp() {
         groupMemberService = new GroupMemberServiceImpl(
                 groupRepository, groupMemberRepository, groupAdminPermissionRepository, userRepository,
-                groupPermissionResolver, groupMembershipMutator, groupLockService, outboxEventPublisher);
+                groupPermissionResolver, groupMembershipMutator, outboxEventPublisher);
     }
 
     private GroupMemberEntity activeMember(GroupMemberRole role) {
@@ -408,9 +406,10 @@ class GroupMemberServiceImplTest {
 
         groupMemberService.transferOwnership(actorId, groupId, targetUserId);
 
-        verify(groupLockService).tryLock(groupId);
         assertThat(actorMembership.getRole()).isEqualTo(GroupMemberRole.ADMIN);
         assertThat(targetMembership.getRole()).isEqualTo(GroupMemberRole.OWNER);
+        verify(groupMemberRepository).saveAndFlush(actorMembership);
+        verify(groupMemberRepository).saveAndFlush(targetMembership);
         verify(groupAdminPermissionRepository)
                 .save(argThat(saved -> saved.getId().equals(new GroupAdminPermissionId(groupId, actorId))));
         verify(groupAdminPermissionRepository).deleteById(new GroupAdminPermissionId(groupId, targetUserId));
@@ -418,14 +417,27 @@ class GroupMemberServiceImplTest {
     }
 
     @Test
-    void transferOwnership_throwsConcurrentModification_whenLockBusy() {
-        doThrow(new AppException(ErrorCode.GROUP_CONCURRENT_MODIFICATION)).when(groupLockService).tryLock(groupId);
+    void transferOwnership_throwsConcurrentModification_whenUniqueOwnerIndexConflicts() {
+        // 2 concurrent transferOwnership calls off the same Owner: the loser's saveAndFlush of the
+        // new Owner hits idx_group_members_one_active_owner because the winner already committed
+        // first — no advisory lock, the DB unique index is the actual safety net (see migration
+        // V20260820100000).
+        GroupEntity group = someGroup();
+        when(groupRepository.findByIdAndIsDeletedFalse(groupId)).thenReturn(Optional.of(group));
+        GroupMemberEntity actorMembership = new GroupMemberEntity(groupId, actorId, GroupMemberRole.OWNER, null);
+        when(groupPermissionResolver.requireActiveMember(groupId, actorId)).thenReturn(actorMembership);
+        GroupMemberEntity targetMembership = activeMember(GroupMemberRole.MEMBER);
+        when(groupMemberRepository.findByGroupIdAndUserIdAndIsActiveTrue(groupId, targetUserId))
+                .thenReturn(Optional.of(targetMembership));
+        when(groupMemberRepository.saveAndFlush(argThat(e -> e == actorMembership))).thenReturn(actorMembership);
+        when(groupMemberRepository.saveAndFlush(argThat(e -> e == targetMembership)))
+                .thenThrow(new DataIntegrityViolationException("idx_group_members_one_active_owner"));
 
         assertThatThrownBy(() -> groupMemberService.transferOwnership(actorId, groupId, targetUserId))
                 .isInstanceOf(AppException.class)
                 .extracting(ex -> ((AppException) ex).getErrorCode())
                 .isEqualTo(ErrorCode.GROUP_CONCURRENT_MODIFICATION);
-        verifyNoInteractions(groupRepository, groupPermissionResolver, groupMemberRepository);
+        verify(groupMemberRepository).saveAndFlush(actorMembership);
     }
 
     @Test

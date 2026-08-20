@@ -1097,9 +1097,10 @@ Javadoc từng entity:
     `JoinGroupResponse` (join qua token) và `AddMemberResponse` (add trực tiếp) — tránh 2 chuỗi
     "magic string" lệch nhau giữa 2 luồng cùng ý nghĩa.
 - **#10 (kick), #11 (phong Admin), #12 (thu hồi Admin) đã code (2026-08-17)** — thêm vào
-  `GroupMemberServiceImpl`/`GroupMemberController`. Lúc code 3 hàm này `GroupLockService` (advisory
-  lock theo `group_id`) chưa tồn tại — được viết ngay sau đó cho #13 (xem bên dưới), nhưng CHƯA
-  retrofit ngược lại cho 3 hàm này lẫn `addMember`/`joinByToken`/`approveJoinRequest`:
+  `GroupMemberServiceImpl`/`GroupMemberController`. Chưa có concurrency guard nào (advisory lock
+  hay unique index) cho 3 hàm này lẫn `addMember`/`joinByToken`/`approveJoinRequest` — chỉ #13 (xem
+  bên dưới) có, vì đó là hàm duy nhất giữ invariant "chỉ 1 OWNER" toàn nhóm mà row-lock thường
+  không tự bảo vệ được:
   - **`DELETE /groups/{groupId}/members/{userId}`** (`kickMember`) — actor cần `CAN_KICK_MEMBERS`
     qua `GroupPermissionResolver`. Rule cố định (không nằm trong `group_admin_permissions`, không
     ai cấu hình được): **không kick được Owner**, **không kick được Admin khác trừ khi actor là
@@ -1126,21 +1127,28 @@ Javadoc từng entity:
   `group_admin_permissions` full-true (baseline như promote thường); target → role=OWNER + xoá
   row `group_admin_permissions` nếu có. Publish `group.role_changed` 2 lần (1 cho actor cũ, 1 cho
   Owner mới).
-  - **`GroupLockService` mới** (`group/util/`) — advisory lock Postgres theo `group_id`, dùng
-    **non-blocking** (`pg_try_advisory_xact_lock`, KHÔNG phải bản blocking
-    `pg_advisory_xact_lock` như `PairLockService` cũ của friend/block) — 2 tx cùng sửa 1 nhóm thì
-    tx thứ 2 fail ngay với `GROUP_CONCURRENT_MODIFICATION` (409) thay vì chờ, tránh phải viết
-    retry loop kiểu optimistic lock cho case tần suất va chạm thấp như nhóm chat. Gọi
-    `groupLockService.tryLock(groupId)` làm việc ĐẦU TIÊN trong `transferOwnership`, trước mọi
-    `SELECT` — chặn đúng write-skew "2 request transferOwner cùng lúc từ 1 Owner sang 2 người
-    khác nhau đều đọc thấy actor còn là OWNER trước khi tx nào commit, cả 2 cùng pass check, cả 2
-    cùng ghi → nhóm có 2 OWNER" (row-lock của `UPDATE` không cứu được vì 2 tx ghi vào 2 row khác
-    nhau, không đụng nhau).
-  - **CHƯA retrofit lock cho #10-12 và #6/8/9** — `kickMember`/`promoteToAdmin`/`demoteToMember`/
-    `addMember`/`joinByToken`/`approveJoinRequest` vẫn chưa gọi `GroupLockService`, chỉ
-    `transferOwnership` có. Nối lại khi cần (rủi ro thấp hơn #13 vì không có invariant "chỉ 1
-    OWNER" toàn nhóm phải giữ, nhưng `member_count`/role vẫn có thể lệch nếu 2 mutation chồng
-    nhau).
+  - **Concurrency: DB unique constraint, KHÔNG dùng advisory lock** (quyết định 2026-08-17, đổi ý
+    so với thiết kế lock ban đầu trong plan gốc) — migration mới
+    `idx_group_members_one_active_owner`: `UNIQUE INDEX ON group_members (group_id) WHERE role =
+    'OWNER' AND is_active = TRUE`. Khác `idx_group_members_group_user_active` (V20260811090000,
+    chặn 1 user có 2 row active TRONG CÙNG 1 group) — index mới này chặn 2 user KHÁC NHAU cùng
+    active với role=OWNER trong CÙNG 1 group, đúng invariant #13 cần.
+  - **Thứ tự bắt buộc trong `transferOwnership`**: đổi actor cũ → ADMIN VÀ `saveAndFlush()` TRƯỚC
+    (rời khỏi phạm vi index), rồi mới đổi target → OWNER VÀ `saveAndFlush()` (đi vào phạm vi
+    index) — cùng thứ tự này trong 1 transaction thì không bao giờ tự đụng constraint của chính
+    nó. `saveAndFlush()`, không phải `save()`, vì cần statement chạy thật NGAY trong transaction
+    hiện tại để bắt được conflict tại chỗ, không đợi tới lúc transaction commit.
+  - **Cách hoạt động khi có race**: 2 request `transferOwner` cùng lúc từ 1 Owner sang 2 người
+    khác nhau — cả 2 đều đọc thấy actor còn là OWNER trước khi tx nào commit, cả 2 pass check
+    `requireOwner`, nhưng khi ghi target→OWNER, tx nào flush SAU (dù target khác nhau) sẽ đụng
+    đúng `idx_group_members_one_active_owner` (cùng `group_id`) → Postgres ném
+    `DataIntegrityViolationException` ngay tại `saveAndFlush()` → catch, dịch thành
+    `AppException(GROUP_CONCURRENT_MODIFICATION)` (409) — pattern y hệt `FriendRequestResolver.
+    insertNew()` (CLAUDE.md gốc #14), không cần lock riêng.
+  - **CHƯA có concurrency guard cho #10-12 và #6/8/9** — `kickMember`/`promoteToAdmin`/
+    `demoteToMember`/`addMember`/`joinByToken`/`approveJoinRequest` chưa có unique constraint hay
+    lock nào bảo vệ `member_count`/role khỏi 2 mutation chồng nhau — rủi ro thấp hơn #13 vì không
+    giữ invariant "chỉ 1 OWNER" toàn nhóm, nhưng vẫn là gap treo, nối lại khi cần.
 
 ## **3.15 Last seen bền vững**
 

@@ -2,6 +2,7 @@ package com.chatapp.core.group.service;
 
 import java.util.UUID;
 
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -23,7 +24,6 @@ import com.chatapp.core.exception.common.ErrorCode;
 import com.chatapp.core.group.GroupMemberService;
 import com.chatapp.core.group.dto.response.AddMemberResponse;
 import com.chatapp.core.group.dto.response.GroupJoinOutcome;
-import com.chatapp.core.group.util.GroupLockService;
 import com.chatapp.core.group.util.GroupPermissionAction;
 import com.chatapp.core.group.util.GroupPermissionResolver;
 
@@ -41,7 +41,6 @@ public class GroupMemberServiceImpl implements GroupMemberService {
     private final UserRepository userRepository;
     private final GroupPermissionResolver groupPermissionResolver;
     private final GroupMembershipMutator groupMembershipMutator;
-    private final GroupLockService groupLockService;
     private final OutboxEventPublisher outboxEventPublisher;
 
     @Override
@@ -172,11 +171,6 @@ public class GroupMemberServiceImpl implements GroupMemberService {
     public void transferOwnership(UUID actorId, UUID groupId, UUID newOwnerUserId) {
         log.debug("transferOwnership start actorId={} groupId={} newOwnerUserId={}", actorId, groupId, newOwnerUserId);
 
-        // Acquire before any read — see GroupLockService javadoc for the write-skew this closes
-        // (2 concurrent transfers off the same Owner would otherwise both read "actor is OWNER"
-        // before either commits, and both would go on to write a new Owner).
-        groupLockService.tryLock(groupId);
-
         groupRepository.findByIdAndIsDeletedFalse(groupId)
                 .orElseThrow(() -> new AppException(ErrorCode.GROUP_NOT_FOUND));
         GroupMemberEntity actorMembership = groupPermissionResolver.requireActiveMember(groupId, actorId);
@@ -186,12 +180,22 @@ public class GroupMemberServiceImpl implements GroupMemberService {
         }
         GroupMemberEntity targetMembership = requireActiveTargetMember(groupId, newOwnerUserId);
 
+        // Demote actor FIRST (leaves idx_group_members_one_active_owner's scope) before promoting
+        // target (enters it) — same order within 1 transaction never self-conflicts. saveAndFlush,
+        // not save: 2 concurrent transferOwnership calls off the same Owner would otherwise both
+        // read "actor is OWNER" before either commits and both go on to write a new Owner — the
+        // unique index is what actually catches that, but only if the target's INSERT/UPDATE runs
+        // (flushes) inside this transaction instead of waiting for commit.
         actorMembership.changeRole(GroupMemberRole.ADMIN);
-        groupMemberRepository.save(actorMembership);
+        groupMemberRepository.saveAndFlush(actorMembership);
         groupAdminPermissionRepository.save(new GroupAdminPermissionEntity(groupId, actorId));
 
         targetMembership.changeRole(GroupMemberRole.OWNER);
-        groupMemberRepository.save(targetMembership);
+        try {
+            groupMemberRepository.saveAndFlush(targetMembership);
+        } catch (DataIntegrityViolationException raceLost) {
+            throw new AppException(ErrorCode.GROUP_CONCURRENT_MODIFICATION);
+        }
         groupAdminPermissionRepository.deleteById(new GroupAdminPermissionId(groupId, newOwnerUserId));
 
         outboxEventPublisher.publish(

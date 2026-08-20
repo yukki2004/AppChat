@@ -773,9 +773,9 @@ identity-service/
 | **11** | **Phong Admin** | Owner set role=ADMIN cho member. |
 | **12** | **Thu hồi Admin** | Owner set role=MEMBER. |
 | **13** | **Chuyển nhượng Owner** | Owner chuyển role OWNER cho member khác (owner trở thành admin). |
-| **14** | **Rời nhóm** | Member tự rời. Nếu Owner rời → cần chuyển nhượng trước, hoặc tự động chọn ADMIN có `joined_at` sớm nhất làm Owner mới; nếu nhóm không còn ADMIN nào (chỉ toàn MEMBER) → tự động chọn MEMBER có `joined_at` sớm nhất; nếu Owner là thành viên duy nhất còn lại → nhóm chuyển `is_deleted=true` (không thể tồn tại nhóm 0 người). |
+| **14** | **Rời nhóm** | Member/Admin tự rời. Owner rời trực tiếp → chặn (`GROUP_OWNER_CANNOT_LEAVE`), KHÔNG tự động chọn Owner mới — bắt buộc tự chuyển nhượng (#13) trước rồi mới rời được (quyết định 2026-08-20, đơn giản hoá — xem ghi chú triển khai bên dưới). |
 | **15** | **Xoá nhóm** | Owner xoá nhóm. Soft delete, notify tất cả members. |
-| **16** | **Xem danh sách thành viên** | Phân trang, filter by role. |
+| **16** | **Xem danh sách thành viên** | 1 API luôn phân trang kiểu cursor (keyset), 40/lần, bất kể `member_count` — KHÔNG filter theo role ở server, client tự lọc (quyết định 2026-08-20, đổi lại 2026-08-21 — xem ghi chú triển khai bên dưới). |
 | **17** | **@mention cá nhân** | Messaging Service gọi GroupService để validate user_id có trong nhóm. |
 | **18** | **@all / @everyone** | Chỉ Admin/Owner dùng. Trigger notify tất cả members. |
 | **19** | **Mute thành viên trong call** | Admin/Owner mute mic participant (thông qua Call Service). |
@@ -1174,6 +1174,41 @@ Javadoc từng entity:
   việc). Publish `group.deleted` (`GroupDeletedMessage{deletedBy}`, exchange/routing key
   `GROUP_DELETED_EXCHANGE`/`GROUP_DELETED_ROUTING_KEY` đã có sẵn trong `RabbitConstant` từ trước,
   chỉ thêm message class).
+- **#16 (xem danh sách thành viên) đã code (2026-08-20), ĐỔI THIẾT KẾ LẠI (2026-08-21) — bỏ
+  nhánh full-load theo `member_count`**: `GroupMemberServiceImpl#listMembers`,
+  `GET /groups/{groupId}/members?cursor=xxx` (cursor optional). Quyết định giữ nguyên: **bỏ
+  filter theo role ở server** — client tự filter/search trên list đã load ở tầng FE, server
+  không cần biết client đang lọc gì.
+  - **Luôn keyset-paginate ở `DEFAULT_PAGE_SIZE=40`/lần, bỏ hẳn nhánh full-load
+    (`FULL_LOAD_THRESHOLD=500` cũ)** — lý do đổi: nhóm có thể được nâng cấp cap lên cao hơn 500
+    (tính năng "nâng cấp nhóm" sẽ làm sau, xem TODO cuối mục này), nên ngưỡng full-load theo
+    `member_count` sẽ tạo ra 1 cliff hành vi kỳ quặc giữa nhóm 500 và 501 người, và bản thân
+    payload gốc nếu để full-load ở nhóm lớn cũng phí băng thông so với cách UI thực tế render
+    (list ảo hoá/scroll, chỉ cần vài chục dòng đầu ngay lúc mở). 1 nhóm ít hơn 40 người vẫn tự
+    nhiên nhận hết trong 1 lần gọi (`nextCursor=null`) vì `findPage` trả về ít hơn `limit+1` —
+    không cần code đặc cách riêng cho case này nữa.
+  - Cơ chế **keyset pagination** trên `(joined_at, id)` giữ nguyên (KHÔNG dùng `OFFSET` — page
+    sau không bị lệch nếu có người join/leave giữa lúc client đang cuộn). Cursor là chuỗi Base64
+    opaque của `"{epochMillis}_{id}"`, decode lỗi → `GROUP_INVALID_CURSOR` (400).
+    `GroupMemberRepository#findPage` là 1 query JPQL duy nhất xử lý cả trang đầu
+    (`afterJoinedAt IS NULL`) và trang sau, tránh 2 method riêng.
+  - **Thêm index `idx_group_members_group_active_joined` trên `(group_id, joined_at, id)
+    WHERE is_active=TRUE`** (migration `V20260821120000`) — 2 index cũ trên `group_members`
+    ((group_id, user_id) và (user_id)) không hỗ trợ trực tiếp `ORDER BY joined_at, id` của
+    `findPage`, cần thiết khi nhóm lên tới hàng nghìn member.
+  - Client chỉ cần 1 logic duy nhất: còn `nextCursor` thì gọi tiếp, `null` thì dừng.
+  - **Field trả về mỗi thành viên (`GroupMemberSummaryResponse`) rút còn 4 field: `userId,
+    displayName, avatarUrl, role`** (bỏ field `nickname` riêng) — `displayName` đã được server
+    resolve sẵn (có nickname trong nhóm thì trả nickname, không thì trả display name gốc), client
+    không cần biết/so 2 nguồn tên. Xem thông tin đầy đủ 1 user thì FE gọi API profile riêng (#27,
+    đã có), KHÔNG nhồi thêm vào response này.
+  - `GroupMemberNicknameRepository` (`base/repository/`) vẫn dùng nguyên như cũ để bulk-load
+    nickname theo `findByIdGroupIdAndIdUserIdIn`, chỉ khác là kết quả giờ gộp vào `displayName`
+    thay vì trả field `nickname` riêng.
+  - **TODO chưa làm**: luồng "nâng cấp nhóm" (tăng `max_members` quá 500) — hiện `max_members` đã
+    là field per-row (default 500 lúc tạo, xem 3.7 #16 cũ), `incrementMemberCountIfUnderLimit` đã
+    so sánh theo field này chứ không hardcode, nên khi luồng nâng cấp được thêm sau chỉ cần 1 API
+    riêng update `max_members`, không cần sửa lại `listMembers`.
 
 ## **3.15 Last seen bền vững**
 

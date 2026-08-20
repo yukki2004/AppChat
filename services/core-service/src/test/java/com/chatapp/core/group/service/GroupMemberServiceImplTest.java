@@ -5,12 +5,15 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -20,6 +23,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import com.chatapp.core.base.OutboxEventPublisher;
 import com.chatapp.core.base.constant.GroupMemberRole;
@@ -28,6 +32,7 @@ import com.chatapp.core.base.entity.GroupEntity;
 import com.chatapp.core.base.entity.GroupMemberEntity;
 import com.chatapp.core.base.entity.UserEntity;
 import com.chatapp.core.base.repository.GroupAdminPermissionRepository;
+import com.chatapp.core.base.repository.GroupMemberNicknameRepository;
 import com.chatapp.core.base.repository.GroupMemberRepository;
 import com.chatapp.core.base.repository.GroupRepository;
 import com.chatapp.core.base.repository.UserRepository;
@@ -35,6 +40,7 @@ import com.chatapp.core.exception.common.AppException;
 import com.chatapp.core.exception.common.ErrorCode;
 import com.chatapp.core.group.dto.response.AddMemberResponse;
 import com.chatapp.core.group.dto.response.GroupJoinOutcome;
+import com.chatapp.core.group.dto.response.GroupMemberListResponse;
 import com.chatapp.core.group.util.GroupPermissionAction;
 import com.chatapp.core.group.util.GroupPermissionResolver;
 
@@ -47,6 +53,8 @@ class GroupMemberServiceImplTest {
     private GroupMemberRepository groupMemberRepository;
     @Mock
     private GroupAdminPermissionRepository groupAdminPermissionRepository;
+    @Mock
+    private GroupMemberNicknameRepository groupMemberNicknameRepository;
     @Mock
     private UserRepository userRepository;
     @Mock
@@ -65,8 +73,8 @@ class GroupMemberServiceImplTest {
     @BeforeEach
     void setUp() {
         groupMemberService = new GroupMemberServiceImpl(
-                groupRepository, groupMemberRepository, groupAdminPermissionRepository, userRepository,
-                groupPermissionResolver, groupMembershipMutator, outboxEventPublisher);
+                groupRepository, groupMemberRepository, groupAdminPermissionRepository, groupMemberNicknameRepository,
+                userRepository, groupPermissionResolver, groupMembershipMutator, outboxEventPublisher);
     }
 
     private GroupMemberEntity activeMember(GroupMemberRole role) {
@@ -537,5 +545,126 @@ class GroupMemberServiceImplTest {
                 .extracting(ex -> ((AppException) ex).getErrorCode())
                 .isEqualTo(ErrorCode.GROUP_NOT_FOUND);
         verify(groupPermissionResolver, never()).requireActiveMember(any(), any());
+    }
+
+    private static void setJoinedAt(GroupMemberEntity member, Instant joinedAt) {
+        ReflectionTestUtils.setField(member, "joinedAt", joinedAt);
+    }
+
+    private static void setId(GroupMemberEntity member, UUID id) {
+        ReflectionTestUtils.setField(member, "id", id);
+    }
+
+    @Test
+    void listMembers_returnsEverythingInOneCall_whenFewerMembersThanPageSize() {
+        GroupEntity group = someGroup();
+        when(groupRepository.findByIdAndIsDeletedFalse(groupId)).thenReturn(Optional.of(group));
+        GroupMemberEntity member = new GroupMemberEntity(groupId, targetUserId, GroupMemberRole.MEMBER, null);
+        setJoinedAt(member, Instant.now());
+        when(groupMemberRepository.findPage(eq(groupId), isNull(), isNull(), any()))
+                .thenReturn(List.of(member));
+        UserEntity user = mock(UserEntity.class);
+        when(user.getId()).thenReturn(targetUserId);
+        when(user.getDisplayName()).thenReturn("Alice");
+        when(user.getAvatarUrl()).thenReturn("http://avatar/alice.png");
+        when(userRepository.findAllById(List.of(targetUserId))).thenReturn(List.of(user));
+        when(groupMemberNicknameRepository.findByIdGroupIdAndIdUserIdIn(groupId, List.of(targetUserId)))
+                .thenReturn(List.of());
+
+        GroupMemberListResponse result = groupMemberService.listMembers(actorId, groupId, null);
+
+        assertThat(result.nextCursor()).isNull();
+        assertThat(result.members()).hasSize(1);
+        assertThat(result.members().get(0).userId()).isEqualTo(targetUserId);
+        assertThat(result.members().get(0).displayName()).isEqualTo("Alice");
+        assertThat(result.members().get(0).role()).isEqualTo(GroupMemberRole.MEMBER);
+    }
+
+    @Test
+    void listMembers_usesNickname_whenOneIsSetForGroup() {
+        GroupEntity group = someGroup();
+        when(groupRepository.findByIdAndIsDeletedFalse(groupId)).thenReturn(Optional.of(group));
+        GroupMemberEntity member = new GroupMemberEntity(groupId, targetUserId, GroupMemberRole.MEMBER, null);
+        setJoinedAt(member, Instant.now());
+        when(groupMemberRepository.findPage(eq(groupId), isNull(), isNull(), any()))
+                .thenReturn(List.of(member));
+        UserEntity user = mock(UserEntity.class);
+        when(user.getId()).thenReturn(targetUserId);
+        when(user.getDisplayName()).thenReturn("Alice");
+        when(userRepository.findAllById(List.of(targetUserId))).thenReturn(List.of(user));
+        com.chatapp.core.base.entity.GroupMemberNicknameEntity nicknameEntity =
+                new com.chatapp.core.base.entity.GroupMemberNicknameEntity(groupId, targetUserId, "Ally", actorId);
+        when(groupMemberNicknameRepository.findByIdGroupIdAndIdUserIdIn(groupId, List.of(targetUserId)))
+                .thenReturn(List.of(nicknameEntity));
+
+        GroupMemberListResponse result = groupMemberService.listMembers(actorId, groupId, null);
+
+        assertThat(result.members().get(0).displayName()).isEqualTo("Ally");
+    }
+
+    @Test
+    void listMembers_returnsNextCursor_whenRepositoryHasMoreThanOnePage() {
+        GroupEntity group = someGroup();
+        when(groupRepository.findByIdAndIsDeletedFalse(groupId)).thenReturn(Optional.of(group));
+        // 41 rows returned for a 40-item page (DEFAULT_PAGE_SIZE) — the extra 1 signals
+        // hasMore=true, matching listMembers()'s "fetch limit+1" trick.
+        List<GroupMemberEntity> rows = new java.util.ArrayList<>();
+        for (int i = 0; i < 41; i++) {
+            GroupMemberEntity m = new GroupMemberEntity(groupId, UUID.randomUUID(), GroupMemberRole.MEMBER, null);
+            setJoinedAt(m, Instant.now().plusSeconds(i));
+            setId(m, UUID.randomUUID());
+            rows.add(m);
+        }
+        String cursor = groupMemberServiceEncodeCursor(rows.get(0));
+        when(groupMemberRepository.findPage(eq(groupId), any(), any(), any())).thenReturn(rows);
+        when(userRepository.findAllById(any())).thenReturn(List.of());
+        when(groupMemberNicknameRepository.findByIdGroupIdAndIdUserIdIn(eq(groupId), any())).thenReturn(List.of());
+
+        GroupMemberListResponse result = groupMemberService.listMembers(actorId, groupId, cursor);
+
+        assertThat(result.members()).hasSize(40);
+        assertThat(result.nextCursor()).isNotNull();
+    }
+
+    private static String groupMemberServiceEncodeCursor(GroupMemberEntity member) {
+        String raw = member.getJoinedAt().toEpochMilli() + "_" + member.getId();
+        return java.util.Base64.getUrlEncoder().withoutPadding()
+                .encodeToString(raw.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void listMembers_throwsInvalidCursor_whenCursorMalformed() {
+        GroupEntity group = someGroup();
+        when(groupRepository.findByIdAndIsDeletedFalse(groupId)).thenReturn(Optional.of(group));
+
+        assertThatThrownBy(() -> groupMemberService.listMembers(actorId, groupId, "not-a-valid-cursor"))
+                .isInstanceOf(AppException.class)
+                .extracting(ex -> ((AppException) ex).getErrorCode())
+                .isEqualTo(ErrorCode.GROUP_INVALID_CURSOR);
+    }
+
+    @Test
+    void listMembers_throwsGroupNotFound_whenGroupMissing() {
+        when(groupRepository.findByIdAndIsDeletedFalse(groupId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> groupMemberService.listMembers(actorId, groupId, null))
+                .isInstanceOf(AppException.class)
+                .extracting(ex -> ((AppException) ex).getErrorCode())
+                .isEqualTo(ErrorCode.GROUP_NOT_FOUND);
+        verify(groupPermissionResolver, never()).requireActiveMember(any(), any());
+    }
+
+    @Test
+    void listMembers_propagatesNotAMember_whenActorNotMember() {
+        GroupEntity group = someGroup();
+        when(groupRepository.findByIdAndIsDeletedFalse(groupId)).thenReturn(Optional.of(group));
+        doThrow(new AppException(ErrorCode.GROUP_NOT_A_MEMBER))
+                .when(groupPermissionResolver).requireActiveMember(groupId, actorId);
+
+        assertThatThrownBy(() -> groupMemberService.listMembers(actorId, groupId, null))
+                .isInstanceOf(AppException.class)
+                .extracting(ex -> ((AppException) ex).getErrorCode())
+                .isEqualTo(ErrorCode.GROUP_NOT_A_MEMBER);
+        verifyNoInteractions(groupMemberRepository);
     }
 }

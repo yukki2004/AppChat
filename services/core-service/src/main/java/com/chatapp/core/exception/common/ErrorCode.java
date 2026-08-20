@@ -129,7 +129,10 @@ public enum ErrorCode {
 
     // group/#14-15 (POST /groups/{groupId}/leave, DELETE /groups/{groupId})
     GROUP_OWNER_CANNOT_LEAVE(10016,
-            "Transfer ownership to someone else before leaving this group", HttpStatus.CONFLICT);
+            "Transfer ownership to someone else before leaving this group", HttpStatus.CONFLICT),
+
+    // group/#16 (GET /groups/{groupId}/members)
+    GROUP_INVALID_CURSOR(10017, "Invalid pagination cursor", HttpStatus.BAD_REQUEST);
 
     int code;
     String message;

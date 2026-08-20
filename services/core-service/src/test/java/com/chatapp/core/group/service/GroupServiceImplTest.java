@@ -265,4 +265,44 @@ class GroupServiceImplTest {
                 .isEqualTo(ErrorCode.GROUP_PERMISSION_DENIED);
         assertThat(group.getInviteLinkToken()).isEqualTo("some-token");
     }
+
+    @Test
+    void deleteGroup_softDeletes_whenActorIsOwner() {
+        GroupEntity group = someGroup("Group", null);
+        stubEditableGroup(group);
+
+        groupService.deleteGroup(actorId, groupId);
+
+        assertThat(group.isDeleted()).isTrue();
+        verify(groupRepository).save(group);
+        verify(outboxEventPublisher).publish(any(), any(), eq(groupId), eq("Group"), any());
+    }
+
+    @Test
+    void deleteGroup_throwsGroupNotFound_whenGroupMissingOrDeleted() {
+        when(groupRepository.findByIdAndIsDeletedFalse(groupId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> groupService.deleteGroup(actorId, groupId))
+                .isInstanceOf(AppException.class)
+                .extracting(ex -> ((AppException) ex).getErrorCode())
+                .isEqualTo(ErrorCode.GROUP_NOT_FOUND);
+        verify(groupPermissionResolver, never()).requireActiveMember(any(), any());
+    }
+
+    @Test
+    void deleteGroup_throwsPermissionDenied_whenActorIsNotOwner() {
+        GroupEntity group = someGroup("Group", null);
+        when(groupRepository.findByIdAndIsDeletedFalse(groupId)).thenReturn(Optional.of(group));
+        GroupMemberEntity membership = new GroupMemberEntity(groupId, actorId, GroupMemberRole.ADMIN, null);
+        when(groupPermissionResolver.requireActiveMember(groupId, actorId)).thenReturn(membership);
+        doThrow(new AppException(ErrorCode.GROUP_PERMISSION_DENIED))
+                .when(groupPermissionResolver).requireOwner(membership);
+
+        assertThatThrownBy(() -> groupService.deleteGroup(actorId, groupId))
+                .isInstanceOf(AppException.class)
+                .extracting(ex -> ((AppException) ex).getErrorCode())
+                .isEqualTo(ErrorCode.GROUP_PERMISSION_DENIED);
+        assertThat(group.isDeleted()).isFalse();
+        verify(groupRepository, never()).save(any());
+    }
 }

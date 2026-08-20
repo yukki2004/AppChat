@@ -125,7 +125,11 @@ public enum ErrorCode {
     GROUP_SELF_TRANSFER_NOT_ALLOWED(10014,
             "You are already the owner of this group", HttpStatus.BAD_REQUEST),
     GROUP_CONCURRENT_MODIFICATION(10015,
-            "This group is being modified by someone else — try again", HttpStatus.CONFLICT);
+            "This group is being modified by someone else — try again", HttpStatus.CONFLICT),
+
+    // group/#14-15 (POST /groups/{groupId}/leave, DELETE /groups/{groupId})
+    GROUP_OWNER_CANNOT_LEAVE(10016,
+            "Transfer ownership to someone else before leaving this group", HttpStatus.CONFLICT);
 
     int code;
     String message;

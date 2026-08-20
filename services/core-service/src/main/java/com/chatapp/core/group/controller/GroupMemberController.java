@@ -63,4 +63,10 @@ public class GroupMemberController {
         groupMemberService.transferOwnership(userId, groupId, request.getUserId());
         return ResponseEntity.noContent().build();
     }
+
+    @PostMapping("/{groupId}/leave")
+    public ResponseEntity<Void> leave(@RequestHeader("X-User-Id") UUID userId, @PathVariable UUID groupId) {
+        groupMemberService.leave(userId, groupId);
+        return ResponseEntity.noContent().build();
+    }
 }

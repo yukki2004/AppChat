@@ -211,6 +211,36 @@ public class GroupMemberServiceImpl implements GroupMemberService {
         log.info("transferOwnership success actorId={} groupId={} newOwnerUserId={}", actorId, groupId, newOwnerUserId);
     }
 
+    @Override
+    @Transactional
+    public void leave(UUID actorId, UUID groupId) {
+        log.debug("leave start actorId={} groupId={}", actorId, groupId);
+
+        GroupEntity group = groupRepository.findByIdAndIsDeletedFalse(groupId)
+                .orElseThrow(() -> new AppException(ErrorCode.GROUP_NOT_FOUND));
+        GroupMemberEntity membership = groupPermissionResolver.requireActiveMember(groupId, actorId);
+        if (membership.getRole() == GroupMemberRole.OWNER) {
+            throw new AppException(ErrorCode.GROUP_OWNER_CANNOT_LEAVE);
+        }
+
+        membership.leave();
+        groupMemberRepository.save(membership);
+        group.decrementMemberCount();
+        groupRepository.save(group);
+        if (membership.getRole() == GroupMemberRole.ADMIN) {
+            groupAdminPermissionRepository.deleteById(new GroupAdminPermissionId(groupId, actorId));
+        }
+
+        outboxEventPublisher.publish(
+                RabbitConstant.GroupExchange.GROUP_MEMBER_REMOVED_EXCHANGE,
+                RabbitConstant.GroupExchange.GROUP_MEMBER_REMOVED_ROUTING_KEY,
+                groupId,
+                "Group",
+                new GroupMemberRemovedMessage(actorId, null));
+
+        log.info("leave success actorId={} groupId={}", actorId, groupId);
+    }
+
     private GroupMemberEntity requireActiveTargetMember(UUID groupId, UUID targetUserId) {
         return groupMemberRepository.findByGroupIdAndUserIdAndIsActiveTrue(groupId, targetUserId)
                 .orElseThrow(() -> new AppException(ErrorCode.GROUP_TARGET_NOT_A_MEMBER));

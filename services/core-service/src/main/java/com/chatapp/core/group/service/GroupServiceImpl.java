@@ -13,6 +13,7 @@ import com.chatapp.core.base.constant.GroupMemberRole;
 import com.chatapp.core.base.constant.RabbitConstant;
 import com.chatapp.core.base.entity.GroupEntity;
 import com.chatapp.core.base.entity.GroupMemberEntity;
+import com.chatapp.core.base.message.group.GroupDeletedMessage;
 import com.chatapp.core.base.message.group.GroupMemberJoinedMessage;
 import com.chatapp.core.base.repository.GroupMemberRepository;
 import com.chatapp.core.base.repository.GroupRepository;
@@ -153,6 +154,32 @@ public class GroupServiceImpl implements GroupService {
         return new GroupInviteLinkResponse(group.getInviteLinkToken());
     }
 
+
+    @Override
+    @Transactional
+    public void deleteGroup(UUID actorId, UUID groupId) {
+        log.debug("deleteGroup start actorId={} groupId={}", actorId, groupId);
+
+        GroupEntity group = groupRepository.findByIdAndIsDeletedFalse(groupId)
+                .orElseThrow(() -> new AppException(ErrorCode.GROUP_NOT_FOUND));
+        GroupMemberEntity actorMembership = groupPermissionResolver.requireActiveMember(groupId, actorId);
+        groupPermissionResolver.requireOwner(actorMembership);
+
+        // group_members rows are left as-is (still is_active=true) — every list-group-of-user
+        // query already joins groups.is_deleted=false, so cascading an update over every member
+        // row here would be pure extra work for no observable difference.
+        group.softDelete();
+        groupRepository.save(group);
+
+        outboxEventPublisher.publish(
+                RabbitConstant.GroupExchange.GROUP_DELETED_EXCHANGE,
+                RabbitConstant.GroupExchange.GROUP_DELETED_ROUTING_KEY,
+                groupId,
+                "Group",
+                new GroupDeletedMessage(actorId));
+
+        log.info("deleteGroup success actorId={} groupId={}", actorId, groupId);
+    }
 
     private GroupEntity requireEditableGroup(UUID actorId, UUID groupId) {
         GroupEntity group = groupRepository.findByIdAndIsDeletedFalse(groupId)

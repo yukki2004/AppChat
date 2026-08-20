@@ -1138,7 +1138,7 @@ Javadoc từng entity:
     'OWNER' AND is_active = TRUE`. Khác `idx_group_members_group_user_active` (V20260811090000,
     chặn 1 user có 2 row active TRONG CÙNG 1 group) — index mới này chặn 2 user KHÁC NHAU cùng
     active với role=OWNER trong CÙNG 1 group, đúng invariant #13 cần.
-  - **Thứ tự bắt buộc trong `transferOwnership`**: đổi actor cũ → ADMIN VÀ `saveAndFlush()` TRƯỚC
+  - **Thứ tự bắt buộc trong `transferOwnership`**: đổi actor cũ → MEMBER VÀ `saveAndFlush()` TRƯỚC
     (rời khỏi phạm vi index), rồi mới đổi target → OWNER VÀ `saveAndFlush()` (đi vào phạm vi
     index) — cùng thứ tự này trong 1 transaction thì không bao giờ tự đụng constraint của chính
     nó. `saveAndFlush()`, không phải `save()`, vì cần statement chạy thật NGAY trong transaction
@@ -1154,6 +1154,26 @@ Javadoc từng entity:
     `demoteToMember`/`addMember`/`joinByToken`/`approveJoinRequest` chưa có unique constraint hay
     lock nào bảo vệ `member_count`/role khỏi 2 mutation chồng nhau — rủi ro thấp hơn #13 vì không
     giữ invariant "chỉ 1 OWNER" toàn nhóm, nhưng vẫn là gap treo, nối lại khi cần.
+- **#14 (rời nhóm) đã code (2026-08-20) — ĐƠN GIẢN HOÁ so với plan gốc, KHÔNG auto-transfer**:
+  `GroupMemberServiceImpl#leave`, `POST /groups/{groupId}/leave`. Plan gốc (mục "14. Rời nhóm")
+  định để Owner rời thì tự chọn Owner mới theo `joined_at` sớm nhất trong Admin/Member còn active
+  — quyết định mới (2026-08-20): **Owner KHÔNG được rời nhóm trực tiếp** →
+  `GROUP_OWNER_CANNOT_LEAVE` (409, message nhắc rõ "transfer ownership trước"), không tự chọn ai
+  cả. Client thấy lỗi này thì tự biết gọi `PUT /groups/{groupId}/owner` (#13) — chuyển cho ai
+  (Member hay Admin đều được, `transferOwnership` không phân biệt) — rồi mới `leave` lại được.
+  Đơn giản hơn nhiều so với thuật toán chọn Owner mới tự động, đổi lại là 2 lệnh gọi API thay vì 1
+  cho use case này. ADMIN/MEMBER rời thì `is_active=false, left_at=now()`, giảm
+  `groups.member_count`, xoá row `group_admin_permissions` nếu đang là Admin, publish
+  `group.member_removed` (`GroupMemberRemovedMessage{userId, removedBy=null}` — `removedBy=null`
+  phân biệt với kick, nơi `removedBy=actorId` của người kick).
+- **#15 (xoá nhóm) đã code (2026-08-20)** — `GroupServiceImpl#deleteGroup`,
+  `DELETE /groups/{groupId}`. CHỈ Owner (`requireOwner`, fixed rule giống #13, không phải cờ
+  `CAN_EDIT_GROUP_INFO`). Soft delete: `groups.is_deleted=true, deleted_at=now()` — **giữ nguyên
+  `group_members`, không cascade set `is_active=false` từng row** (quyết định đã chốt sẵn trong
+  plan gốc: mọi query list-group-của-user đã join `groups.is_deleted=false`, cascade thêm là dư
+  việc). Publish `group.deleted` (`GroupDeletedMessage{deletedBy}`, exchange/routing key
+  `GROUP_DELETED_EXCHANGE`/`GROUP_DELETED_ROUTING_KEY` đã có sẵn trong `RabbitConstant` từ trước,
+  chỉ thêm message class).
 
 ## **3.15 Last seen bền vững**
 

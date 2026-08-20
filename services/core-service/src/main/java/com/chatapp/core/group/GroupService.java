@@ -21,4 +21,6 @@ public interface GroupService {
     GroupInviteLinkResponse generateInviteLink(UUID actorId, UUID groupId);
 
     GroupInviteLinkResponse resetInviteLink(UUID actorId, UUID groupId);
+
+    void deleteGroup(UUID actorId, UUID groupId);
 }

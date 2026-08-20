@@ -3,6 +3,7 @@ package com.chatapp.core.group.controller;
 import java.util.UUID;
 
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -68,5 +69,11 @@ public class GroupController {
     public ResponseEntity<ApiResponse<GroupInviteLinkResponse>> resetInviteLink(
             @RequestHeader("X-User-Id") UUID userId, @PathVariable UUID groupId) {
         return ResponseEntity.ok(ApiResponse.ok(groupService.resetInviteLink(userId, groupId)));
+    }
+
+    @DeleteMapping("/{groupId}")
+    public ResponseEntity<Void> deleteGroup(@RequestHeader("X-User-Id") UUID userId, @PathVariable UUID groupId) {
+        groupService.deleteGroup(userId, groupId);
+        return ResponseEntity.noContent().build();
     }
 }

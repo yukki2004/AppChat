@@ -483,4 +483,59 @@ class GroupMemberServiceImplTest {
                 .extracting(ex -> ((AppException) ex).getErrorCode())
                 .isEqualTo(ErrorCode.GROUP_TARGET_NOT_A_MEMBER);
     }
+
+    @Test
+    void leave_removesMember_whenActorIsPlainMember() {
+        GroupEntity group = someGroup();
+        group.incrementMemberCount();
+        when(groupRepository.findByIdAndIsDeletedFalse(groupId)).thenReturn(Optional.of(group));
+        GroupMemberEntity membership = new GroupMemberEntity(groupId, actorId, GroupMemberRole.MEMBER, null);
+        when(groupPermissionResolver.requireActiveMember(groupId, actorId)).thenReturn(membership);
+
+        groupMemberService.leave(actorId, groupId);
+
+        assertThat(membership.isActive()).isFalse();
+        assertThat(group.getMemberCount()).isZero();
+        verify(groupAdminPermissionRepository, never()).deleteById(any());
+        verify(outboxEventPublisher).publish(any(), any(), eq(groupId), eq("Group"), any());
+    }
+
+    @Test
+    void leave_removesAdmin_andDropsAdminPermissionRow() {
+        GroupEntity group = someGroup();
+        when(groupRepository.findByIdAndIsDeletedFalse(groupId)).thenReturn(Optional.of(group));
+        GroupMemberEntity membership = new GroupMemberEntity(groupId, actorId, GroupMemberRole.ADMIN, null);
+        when(groupPermissionResolver.requireActiveMember(groupId, actorId)).thenReturn(membership);
+
+        groupMemberService.leave(actorId, groupId);
+
+        assertThat(membership.isActive()).isFalse();
+        verify(groupAdminPermissionRepository).deleteById(new GroupAdminPermissionId(groupId, actorId));
+    }
+
+    @Test
+    void leave_throwsOwnerCannotLeave_whenActorIsOwner() {
+        GroupEntity group = someGroup();
+        when(groupRepository.findByIdAndIsDeletedFalse(groupId)).thenReturn(Optional.of(group));
+        GroupMemberEntity membership = new GroupMemberEntity(groupId, actorId, GroupMemberRole.OWNER, null);
+        when(groupPermissionResolver.requireActiveMember(groupId, actorId)).thenReturn(membership);
+
+        assertThatThrownBy(() -> groupMemberService.leave(actorId, groupId))
+                .isInstanceOf(AppException.class)
+                .extracting(ex -> ((AppException) ex).getErrorCode())
+                .isEqualTo(ErrorCode.GROUP_OWNER_CANNOT_LEAVE);
+        assertThat(membership.isActive()).isTrue();
+        verifyNoInteractions(groupAdminPermissionRepository);
+    }
+
+    @Test
+    void leave_throwsGroupNotFound_whenGroupMissing() {
+        when(groupRepository.findByIdAndIsDeletedFalse(groupId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> groupMemberService.leave(actorId, groupId))
+                .isInstanceOf(AppException.class)
+                .extracting(ex -> ((AppException) ex).getErrorCode())
+                .isEqualTo(ErrorCode.GROUP_NOT_FOUND);
+        verify(groupPermissionResolver, never()).requireActiveMember(any(), any());
+    }
 }

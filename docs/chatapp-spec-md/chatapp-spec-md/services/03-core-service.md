@@ -1097,9 +1097,9 @@ Javadoc từng entity:
     `JoinGroupResponse` (join qua token) và `AddMemberResponse` (add trực tiếp) — tránh 2 chuỗi
     "magic string" lệch nhau giữa 2 luồng cùng ý nghĩa.
 - **#10 (kick), #11 (phong Admin), #12 (thu hồi Admin) đã code (2026-08-17)** — thêm vào
-  `GroupMemberServiceImpl`/`GroupMemberController`, chưa dùng `GroupLockService` (advisory lock
-  theo `group_id` ở mục Concurrency của plan gốc) — cùng gap với `addMember`/`joinByToken`/
-  `approveJoinRequest` hiện tại, tất cả đều CHƯA lock, nối lại khi `GroupLockService` được viết:
+  `GroupMemberServiceImpl`/`GroupMemberController`. Lúc code 3 hàm này `GroupLockService` (advisory
+  lock theo `group_id`) chưa tồn tại — được viết ngay sau đó cho #13 (xem bên dưới), nhưng CHƯA
+  retrofit ngược lại cho 3 hàm này lẫn `addMember`/`joinByToken`/`approveJoinRequest`:
   - **`DELETE /groups/{groupId}/members/{userId}`** (`kickMember`) — actor cần `CAN_KICK_MEMBERS`
     qua `GroupPermissionResolver`. Rule cố định (không nằm trong `group_admin_permissions`, không
     ai cấu hình được): **không kick được Owner**, **không kick được Admin khác trừ khi actor là
@@ -1119,8 +1119,28 @@ Javadoc từng entity:
   - **`DELETE /groups/{groupId}/admins/{userId}`** (`demoteToMember`) — CHỈ Owner. Target phải
     đang là ADMIN, không phải → `GROUP_TARGET_NOT_AN_ADMIN` (404). Set role=MEMBER, xoá row
     `group_admin_permissions`, publish `group.role_changed`.
-  - **#13 (chuyển Owner) CHƯA code** — nằm ngoài scope lượt này, để riêng vì cần bàn thêm cách xử
-    lý concurrency (advisory lock) trước khi code.
+- **#13 (chuyển Owner) đã code (2026-08-17)** — `GroupMemberServiceImpl#transferOwnership`,
+  `PUT /groups/{groupId}/owner {userId}`. CHỈ Owner (`requireOwner`). Không tự chuyển cho chính
+  mình → `GROUP_SELF_TRANSFER_NOT_ALLOWED` (400). Target phải đang active trong nhóm →
+  `GROUP_TARGET_NOT_A_MEMBER` (404, dùng lại code #10-12). Actor cũ → role=ADMIN + insert
+  `group_admin_permissions` full-true (baseline như promote thường); target → role=OWNER + xoá
+  row `group_admin_permissions` nếu có. Publish `group.role_changed` 2 lần (1 cho actor cũ, 1 cho
+  Owner mới).
+  - **`GroupLockService` mới** (`group/util/`) — advisory lock Postgres theo `group_id`, dùng
+    **non-blocking** (`pg_try_advisory_xact_lock`, KHÔNG phải bản blocking
+    `pg_advisory_xact_lock` như `PairLockService` cũ của friend/block) — 2 tx cùng sửa 1 nhóm thì
+    tx thứ 2 fail ngay với `GROUP_CONCURRENT_MODIFICATION` (409) thay vì chờ, tránh phải viết
+    retry loop kiểu optimistic lock cho case tần suất va chạm thấp như nhóm chat. Gọi
+    `groupLockService.tryLock(groupId)` làm việc ĐẦU TIÊN trong `transferOwnership`, trước mọi
+    `SELECT` — chặn đúng write-skew "2 request transferOwner cùng lúc từ 1 Owner sang 2 người
+    khác nhau đều đọc thấy actor còn là OWNER trước khi tx nào commit, cả 2 cùng pass check, cả 2
+    cùng ghi → nhóm có 2 OWNER" (row-lock của `UPDATE` không cứu được vì 2 tx ghi vào 2 row khác
+    nhau, không đụng nhau).
+  - **CHƯA retrofit lock cho #10-12 và #6/8/9** — `kickMember`/`promoteToAdmin`/`demoteToMember`/
+    `addMember`/`joinByToken`/`approveJoinRequest` vẫn chưa gọi `GroupLockService`, chỉ
+    `transferOwnership` có. Nối lại khi cần (rủi ro thấp hơn #13 vì không có invariant "chỉ 1
+    OWNER" toàn nhóm phải giữ, nhưng `member_count`/role vẫn có thể lệch nếu 2 mutation chồng
+    nhau).
 
 ## **3.15 Last seen bền vững**
 

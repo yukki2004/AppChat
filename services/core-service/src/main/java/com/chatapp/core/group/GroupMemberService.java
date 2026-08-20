@@ -13,4 +13,6 @@ public interface GroupMemberService {
     void promoteToAdmin(UUID actorId, UUID groupId, UUID targetUserId);
 
     void demoteToMember(UUID actorId, UUID groupId, UUID targetUserId);
+
+    void transferOwnership(UUID actorId, UUID groupId, UUID newOwnerUserId);
 }

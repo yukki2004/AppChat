@@ -34,6 +34,7 @@ import com.chatapp.core.exception.common.AppException;
 import com.chatapp.core.exception.common.ErrorCode;
 import com.chatapp.core.group.dto.response.AddMemberResponse;
 import com.chatapp.core.group.dto.response.GroupJoinOutcome;
+import com.chatapp.core.group.util.GroupLockService;
 import com.chatapp.core.group.util.GroupPermissionAction;
 import com.chatapp.core.group.util.GroupPermissionResolver;
 
@@ -53,6 +54,8 @@ class GroupMemberServiceImplTest {
     @Mock
     private GroupMembershipMutator groupMembershipMutator;
     @Mock
+    private GroupLockService groupLockService;
+    @Mock
     private OutboxEventPublisher outboxEventPublisher;
 
     private GroupMemberServiceImpl groupMemberService;
@@ -65,7 +68,7 @@ class GroupMemberServiceImplTest {
     void setUp() {
         groupMemberService = new GroupMemberServiceImpl(
                 groupRepository, groupMemberRepository, groupAdminPermissionRepository, userRepository,
-                groupPermissionResolver, groupMembershipMutator, outboxEventPublisher);
+                groupPermissionResolver, groupMembershipMutator, groupLockService, outboxEventPublisher);
     }
 
     private GroupMemberEntity activeMember(GroupMemberRole role) {
@@ -391,5 +394,82 @@ class GroupMemberServiceImplTest {
                 .extracting(ex -> ((AppException) ex).getErrorCode())
                 .isEqualTo(ErrorCode.GROUP_PERMISSION_DENIED);
         verifyNoInteractions(groupMemberRepository);
+    }
+
+    @Test
+    void transferOwnership_swapsRoles_whenActorIsOwner() {
+        GroupEntity group = someGroup();
+        when(groupRepository.findByIdAndIsDeletedFalse(groupId)).thenReturn(Optional.of(group));
+        GroupMemberEntity actorMembership = new GroupMemberEntity(groupId, actorId, GroupMemberRole.OWNER, null);
+        when(groupPermissionResolver.requireActiveMember(groupId, actorId)).thenReturn(actorMembership);
+        GroupMemberEntity targetMembership = activeMember(GroupMemberRole.MEMBER);
+        when(groupMemberRepository.findByGroupIdAndUserIdAndIsActiveTrue(groupId, targetUserId))
+                .thenReturn(Optional.of(targetMembership));
+
+        groupMemberService.transferOwnership(actorId, groupId, targetUserId);
+
+        verify(groupLockService).tryLock(groupId);
+        assertThat(actorMembership.getRole()).isEqualTo(GroupMemberRole.ADMIN);
+        assertThat(targetMembership.getRole()).isEqualTo(GroupMemberRole.OWNER);
+        verify(groupAdminPermissionRepository)
+                .save(argThat(saved -> saved.getId().equals(new GroupAdminPermissionId(groupId, actorId))));
+        verify(groupAdminPermissionRepository).deleteById(new GroupAdminPermissionId(groupId, targetUserId));
+        verify(outboxEventPublisher, org.mockito.Mockito.times(2)).publish(any(), any(), eq(groupId), eq("Group"), any());
+    }
+
+    @Test
+    void transferOwnership_throwsConcurrentModification_whenLockBusy() {
+        doThrow(new AppException(ErrorCode.GROUP_CONCURRENT_MODIFICATION)).when(groupLockService).tryLock(groupId);
+
+        assertThatThrownBy(() -> groupMemberService.transferOwnership(actorId, groupId, targetUserId))
+                .isInstanceOf(AppException.class)
+                .extracting(ex -> ((AppException) ex).getErrorCode())
+                .isEqualTo(ErrorCode.GROUP_CONCURRENT_MODIFICATION);
+        verifyNoInteractions(groupRepository, groupPermissionResolver, groupMemberRepository);
+    }
+
+    @Test
+    void transferOwnership_throwsSelfTransferNotAllowed_whenTargetIsActor() {
+        GroupEntity group = someGroup();
+        when(groupRepository.findByIdAndIsDeletedFalse(groupId)).thenReturn(Optional.of(group));
+        GroupMemberEntity actorMembership = new GroupMemberEntity(groupId, actorId, GroupMemberRole.OWNER, null);
+        when(groupPermissionResolver.requireActiveMember(groupId, actorId)).thenReturn(actorMembership);
+
+        assertThatThrownBy(() -> groupMemberService.transferOwnership(actorId, groupId, actorId))
+                .isInstanceOf(AppException.class)
+                .extracting(ex -> ((AppException) ex).getErrorCode())
+                .isEqualTo(ErrorCode.GROUP_SELF_TRANSFER_NOT_ALLOWED);
+        verifyNoInteractions(groupMemberRepository);
+    }
+
+    @Test
+    void transferOwnership_throwsPermissionDenied_whenActorIsNotOwner() {
+        GroupEntity group = someGroup();
+        when(groupRepository.findByIdAndIsDeletedFalse(groupId)).thenReturn(Optional.of(group));
+        GroupMemberEntity actorMembership = new GroupMemberEntity(groupId, actorId, GroupMemberRole.ADMIN, null);
+        when(groupPermissionResolver.requireActiveMember(groupId, actorId)).thenReturn(actorMembership);
+        doThrow(new AppException(ErrorCode.GROUP_PERMISSION_DENIED))
+                .when(groupPermissionResolver).requireOwner(actorMembership);
+
+        assertThatThrownBy(() -> groupMemberService.transferOwnership(actorId, groupId, targetUserId))
+                .isInstanceOf(AppException.class)
+                .extracting(ex -> ((AppException) ex).getErrorCode())
+                .isEqualTo(ErrorCode.GROUP_PERMISSION_DENIED);
+        verifyNoInteractions(groupMemberRepository);
+    }
+
+    @Test
+    void transferOwnership_throwsTargetNotAMember_whenTargetNotActive() {
+        GroupEntity group = someGroup();
+        when(groupRepository.findByIdAndIsDeletedFalse(groupId)).thenReturn(Optional.of(group));
+        GroupMemberEntity actorMembership = new GroupMemberEntity(groupId, actorId, GroupMemberRole.OWNER, null);
+        when(groupPermissionResolver.requireActiveMember(groupId, actorId)).thenReturn(actorMembership);
+        when(groupMemberRepository.findByGroupIdAndUserIdAndIsActiveTrue(groupId, targetUserId))
+                .thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> groupMemberService.transferOwnership(actorId, groupId, targetUserId))
+                .isInstanceOf(AppException.class)
+                .extracting(ex -> ((AppException) ex).getErrorCode())
+                .isEqualTo(ErrorCode.GROUP_TARGET_NOT_A_MEMBER);
     }
 }

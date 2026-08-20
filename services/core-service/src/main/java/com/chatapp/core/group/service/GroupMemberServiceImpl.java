@@ -23,6 +23,7 @@ import com.chatapp.core.exception.common.ErrorCode;
 import com.chatapp.core.group.GroupMemberService;
 import com.chatapp.core.group.dto.response.AddMemberResponse;
 import com.chatapp.core.group.dto.response.GroupJoinOutcome;
+import com.chatapp.core.group.util.GroupLockService;
 import com.chatapp.core.group.util.GroupPermissionAction;
 import com.chatapp.core.group.util.GroupPermissionResolver;
 
@@ -40,6 +41,7 @@ public class GroupMemberServiceImpl implements GroupMemberService {
     private final UserRepository userRepository;
     private final GroupPermissionResolver groupPermissionResolver;
     private final GroupMembershipMutator groupMembershipMutator;
+    private final GroupLockService groupLockService;
     private final OutboxEventPublisher outboxEventPublisher;
 
     @Override
@@ -163,6 +165,49 @@ public class GroupMemberServiceImpl implements GroupMemberService {
                 new GroupRoleChangedMessage(targetUserId, GroupMemberRole.MEMBER, actorId));
 
         log.info("demoteToMember success actorId={} groupId={} targetUserId={}", actorId, groupId, targetUserId);
+    }
+
+    @Override
+    @Transactional
+    public void transferOwnership(UUID actorId, UUID groupId, UUID newOwnerUserId) {
+        log.debug("transferOwnership start actorId={} groupId={} newOwnerUserId={}", actorId, groupId, newOwnerUserId);
+
+        // Acquire before any read — see GroupLockService javadoc for the write-skew this closes
+        // (2 concurrent transfers off the same Owner would otherwise both read "actor is OWNER"
+        // before either commits, and both would go on to write a new Owner).
+        groupLockService.tryLock(groupId);
+
+        groupRepository.findByIdAndIsDeletedFalse(groupId)
+                .orElseThrow(() -> new AppException(ErrorCode.GROUP_NOT_FOUND));
+        GroupMemberEntity actorMembership = groupPermissionResolver.requireActiveMember(groupId, actorId);
+        groupPermissionResolver.requireOwner(actorMembership);
+        if (newOwnerUserId.equals(actorId)) {
+            throw new AppException(ErrorCode.GROUP_SELF_TRANSFER_NOT_ALLOWED);
+        }
+        GroupMemberEntity targetMembership = requireActiveTargetMember(groupId, newOwnerUserId);
+
+        actorMembership.changeRole(GroupMemberRole.ADMIN);
+        groupMemberRepository.save(actorMembership);
+        groupAdminPermissionRepository.save(new GroupAdminPermissionEntity(groupId, actorId));
+
+        targetMembership.changeRole(GroupMemberRole.OWNER);
+        groupMemberRepository.save(targetMembership);
+        groupAdminPermissionRepository.deleteById(new GroupAdminPermissionId(groupId, newOwnerUserId));
+
+        outboxEventPublisher.publish(
+                RabbitConstant.GroupExchange.GROUP_ROLE_CHANGED_EXCHANGE,
+                RabbitConstant.GroupExchange.GROUP_ROLE_CHANGED_ROUTING_KEY,
+                groupId,
+                "Group",
+                new GroupRoleChangedMessage(actorId, GroupMemberRole.ADMIN, actorId));
+        outboxEventPublisher.publish(
+                RabbitConstant.GroupExchange.GROUP_ROLE_CHANGED_EXCHANGE,
+                RabbitConstant.GroupExchange.GROUP_ROLE_CHANGED_ROUTING_KEY,
+                groupId,
+                "Group",
+                new GroupRoleChangedMessage(newOwnerUserId, GroupMemberRole.OWNER, actorId));
+
+        log.info("transferOwnership success actorId={} groupId={} newOwnerUserId={}", actorId, groupId, newOwnerUserId);
     }
 
     private GroupMemberEntity requireActiveTargetMember(UUID groupId, UUID targetUserId) {

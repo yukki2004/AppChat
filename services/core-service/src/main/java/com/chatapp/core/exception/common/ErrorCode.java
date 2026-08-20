@@ -119,7 +119,13 @@ public enum ErrorCode {
     GROUP_CANNOT_KICK_OWNER_OR_ADMIN(10011,
             "You cannot kick the group owner or another admin", HttpStatus.FORBIDDEN),
     GROUP_TARGET_ALREADY_ADMIN(10012, "This user is already an admin of this group", HttpStatus.CONFLICT),
-    GROUP_TARGET_NOT_AN_ADMIN(10013, "This user is not an admin of this group", HttpStatus.NOT_FOUND);
+    GROUP_TARGET_NOT_AN_ADMIN(10013, "This user is not an admin of this group", HttpStatus.NOT_FOUND),
+
+    // group/#13 (PUT /groups/{groupId}/owner)
+    GROUP_SELF_TRANSFER_NOT_ALLOWED(10014,
+            "You are already the owner of this group", HttpStatus.BAD_REQUEST),
+    GROUP_CONCURRENT_MODIFICATION(10015,
+            "This group is being modified by someone else — try again", HttpStatus.CONFLICT);
 
     int code;
     String message;

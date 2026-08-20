@@ -406,12 +406,11 @@ class GroupMemberServiceImplTest {
 
         groupMemberService.transferOwnership(actorId, groupId, targetUserId);
 
-        assertThat(actorMembership.getRole()).isEqualTo(GroupMemberRole.ADMIN);
+        assertThat(actorMembership.getRole()).isEqualTo(GroupMemberRole.MEMBER);
         assertThat(targetMembership.getRole()).isEqualTo(GroupMemberRole.OWNER);
         verify(groupMemberRepository).saveAndFlush(actorMembership);
         verify(groupMemberRepository).saveAndFlush(targetMembership);
-        verify(groupAdminPermissionRepository)
-                .save(argThat(saved -> saved.getId().equals(new GroupAdminPermissionId(groupId, actorId))));
+        verify(groupAdminPermissionRepository, never()).save(any());
         verify(groupAdminPermissionRepository).deleteById(new GroupAdminPermissionId(groupId, targetUserId));
         verify(outboxEventPublisher, org.mockito.Mockito.times(2)).publish(any(), any(), eq(groupId), eq("Group"), any());
     }

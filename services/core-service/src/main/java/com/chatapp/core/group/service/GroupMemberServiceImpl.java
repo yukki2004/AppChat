@@ -180,15 +180,12 @@ public class GroupMemberServiceImpl implements GroupMemberService {
         }
         GroupMemberEntity targetMembership = requireActiveTargetMember(groupId, newOwnerUserId);
 
-        // Demote actor FIRST (leaves idx_group_members_one_active_owner's scope) before promoting
-        // target (enters it) — same order within 1 transaction never self-conflicts. saveAndFlush,
-        // not save: 2 concurrent transferOwnership calls off the same Owner would otherwise both
-        // read "actor is OWNER" before either commits and both go on to write a new Owner — the
-        // unique index is what actually catches that, but only if the target's INSERT/UPDATE runs
-        // (flushes) inside this transaction instead of waiting for commit.
-        actorMembership.changeRole(GroupMemberRole.ADMIN);
+        // Old Owner drops straight to MEMBER — no group_admin_permissions row inserted here.
+        // If the new Owner wants to keep them as an Admin, that's a separate promoteToAdmin()
+        // call (their own decision, own permission baseline), not something transferOwnership
+        // assumes for them.
+        actorMembership.changeRole(GroupMemberRole.MEMBER);
         groupMemberRepository.saveAndFlush(actorMembership);
-        groupAdminPermissionRepository.save(new GroupAdminPermissionEntity(groupId, actorId));
 
         targetMembership.changeRole(GroupMemberRole.OWNER);
         try {
@@ -203,7 +200,7 @@ public class GroupMemberServiceImpl implements GroupMemberService {
                 RabbitConstant.GroupExchange.GROUP_ROLE_CHANGED_ROUTING_KEY,
                 groupId,
                 "Group",
-                new GroupRoleChangedMessage(actorId, GroupMemberRole.ADMIN, actorId));
+                new GroupRoleChangedMessage(actorId, GroupMemberRole.MEMBER, actorId));
         outboxEventPublisher.publish(
                 RabbitConstant.GroupExchange.GROUP_ROLE_CHANGED_EXCHANGE,
                 RabbitConstant.GroupExchange.GROUP_ROLE_CHANGED_ROUTING_KEY,

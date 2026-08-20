@@ -1123,10 +1123,15 @@ Javadoc từng entity:
 - **#13 (chuyển Owner) đã code (2026-08-17)** — `GroupMemberServiceImpl#transferOwnership`,
   `PUT /groups/{groupId}/owner {userId}`. CHỈ Owner (`requireOwner`). Không tự chuyển cho chính
   mình → `GROUP_SELF_TRANSFER_NOT_ALLOWED` (400). Target phải đang active trong nhóm →
-  `GROUP_TARGET_NOT_A_MEMBER` (404, dùng lại code #10-12). Actor cũ → role=ADMIN + insert
-  `group_admin_permissions` full-true (baseline như promote thường); target → role=OWNER + xoá
-  row `group_admin_permissions` nếu có. Publish `group.role_changed` 2 lần (1 cho actor cũ, 1 cho
-  Owner mới).
+  `GROUP_TARGET_NOT_A_MEMBER` (404, dùng lại code #10-12). **Actor cũ → role=MEMBER thẳng**
+  (quyết định 2026-08-17, khác thiết kế ban đầu "actor cũ tự lên ADMIN") — KHÔNG tự insert
+  `group_admin_permissions` cho actor; Owner mới muốn giữ actor cũ làm Admin thì tự gọi
+  `promoteToAdmin` riêng, không phải hành vi ngầm định của `transferOwnership`. Lý do đổi: tránh
+  hẳn 1 race giữa `transferOwnership` và `promoteToAdmin`/`demoteToMember` chạy đồng thời trên
+  đúng actor (2 nguồn cùng ghi/xoá `group_admin_permissions` cho 1 người), và đơn giản hoá luồng
+  — không phải suy nghĩ actor cũ "nên" giữ quyền gì sau khi rời ghế Owner. Target → role=OWNER +
+  xoá row `group_admin_permissions` nếu có (Owner không có row nào). Publish `group.role_changed`
+  2 lần (1 cho actor cũ → MEMBER, 1 cho Owner mới → OWNER).
   - **Concurrency: DB unique constraint, KHÔNG dùng advisory lock** (quyết định 2026-08-17, đổi ý
     so với thiết kế lock ban đầu trong plan gốc) — migration mới
     `idx_group_members_one_active_owner`: `UNIQUE INDEX ON group_members (group_id) WHERE role =

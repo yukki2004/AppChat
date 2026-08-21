@@ -35,14 +35,12 @@ class GroupMembershipMutator {
     private final OutboxEventPublisher outboxEventPublisher;
 
     void addMemberDirectly(GroupEntity group, UUID userId, GroupMemberRole role, UUID addedBy) {
-        if (group.getMemberCount() >= group.getMaxMembers()) {
+        if (groupRepository.incrementMemberCountIfUnderLimit(group.getId()) == 0) {
             throw new AppException(ErrorCode.GROUP_MEMBER_LIMIT_REACHED);
         }
 
         GroupMemberEntity member = new GroupMemberEntity(group.getId(), userId, role, addedBy);
         groupMemberRepository.save(member);
-        group.incrementMemberCount();
-        groupRepository.save(group);
 
         outboxEventPublisher.publish(
                 RabbitConstant.GroupExchange.GROUP_MEMBER_JOINED_EXCHANGE,
